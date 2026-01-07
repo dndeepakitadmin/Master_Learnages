@@ -1,7 +1,6 @@
 import React from 'react';
 import { WordPair } from '../types';
 import { AudioPlayer } from './AudioPlayer';
-import { ArrowDown } from 'lucide-react';
 
 interface FlashcardProps {
   word: WordPair;

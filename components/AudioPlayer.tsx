@@ -1,105 +1,91 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Volume2, Loader2, VolumeX } from 'lucide-react';
-import { generateAudio } from '../services/geminiService';
 
 interface AudioPlayerProps {
   text: string;
-  langCode: string; // Used to determine voice optimization
+  langCode: string; // e.g. 'kn', 'hi', 'en'
   label?: string;
   size?: 'sm' | 'md';
 }
 
-// Helper to decode base64 to audio buffer
-const decodeAudioData = async (base64Data: string, audioContext: AudioContext): Promise<AudioBuffer> => {
-  const binaryString = atob(base64Data);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return await audioContext.decodeAudioData(bytes.buffer);
+// Helper to map App Language Codes to Android/Browser BCP-47 Codes
+const getBrowserLangCode = (code: string): string => {
+  const map: Record<string, string> = {
+    'kn': 'kn-IN', // Kannada
+    'hi': 'hi-IN', // Hindi
+    'ml': 'ml-IN', // Malayalam
+    'ta': 'ta-IN', // Tamil
+    'te': 'te-IN', // Telugu
+    'gu': 'gu-IN', // Gujarati
+    'bn': 'bn-IN', // Bengali
+    'pa': 'pa-IN', // Punjabi
+    'mr': 'mr-IN', // Marathi
+    'ur': 'ur-IN', // Urdu
+    'en': 'en-US', 
+    'es': 'es-ES', 
+    'fr': 'fr-FR', 
+    'de': 'de-DE',
+    'ja': 'ja-JP', 
+    'ko': 'ko-KR', 
+    'zh': 'zh-CN', 
+    'ar': 'ar-SA'
+  };
+  return map[code] || code;
 };
 
 export const AudioPlayer: React.FC<AudioPlayerProps> = ({ text, langCode, label, size = 'md' }) => {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isAvailable, setIsAvailable] = useState(true); // Assume available until failed
-  const audioContextRef = useRef<AudioContext | null>(null);
+  const [isSupported, setIsSupported] = useState(true);
 
-  const handlePlay = async () => {
-    if (isLoading || isPlaying || !isAvailable) return;
-    setIsLoading(true);
-
-    try {
-      // 1. Generate Audio via Gemini
-      const isEnglish = langCode === 'en';
-      const base64Audio = await generateAudio(text, isEnglish);
-
-      // 2. Setup Audio Context
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      }
-      const ctx = audioContextRef.current;
-      
-      // Resume context if suspended (browser autoplay policy)
-      if (ctx.state === 'suspended') {
-        await ctx.resume();
-      }
-
-      // 3. Decode and Play
-      const audioBuffer = await decodeAudioData(base64Audio, ctx);
-      const source = ctx.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(ctx.destination);
-      
-      source.onended = () => {
-        setIsPlaying(false);
-      };
-
-      source.start(0);
-      setIsPlaying(true);
-
-    } catch (err) {
-      console.error("Failed to play audio:", err);
-      // Instead of showing an error message, we just disable the player (skip audio)
-      setIsAvailable(false);
-    } finally {
-      setIsLoading(false);
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) {
+      setIsSupported(false);
     }
+  }, []);
+
+  const handlePlay = () => {
+    if (!isSupported || isPlaying || !text) return;
+
+    // Cancel any existing speech
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = getBrowserLangCode(langCode);
+    utterance.rate = 0.7; // Slightly slower for better clarity
+    utterance.pitch = 1.0;
+
+    utterance.onstart = () => setIsPlaying(true);
+    utterance.onend = () => setIsPlaying(false);
+    utterance.onerror = (e) => {
+      console.error("TTS Error:", e);
+      setIsPlaying(false);
+    };
+
+    // Mobile Chrome/Android requires this to be called directly in user action
+    window.speechSynthesis.speak(utterance);
   };
 
   const iconSize = size === 'sm' ? 16 : 20;
 
-  // If audio failed (not supported), we render a disabled state or simpler UI
-  // Per requirement: "If gTTS does NOT support a language -> skip audio"
-  if (!isAvailable) {
-    return (
-        <div className="flex items-center gap-2 opacity-40 cursor-not-allowed" title="Audio not available">
-             <div className={`flex items-center justify-center rounded-full bg-slate-100 text-slate-400 ${size === 'sm' ? 'p-1.5' : 'p-3'}`}>
-                <VolumeX size={iconSize} />
-             </div>
-             {label && <span className="text-sm text-slate-400 font-medium">{label}</span>}
-        </div>
-    );
-  }
+  if (!isSupported) return null;
 
   return (
     <div className="flex items-center gap-2">
       <button
         onClick={handlePlay}
-        disabled={isLoading || isPlaying}
+        disabled={isPlaying}
         className={`
           flex items-center justify-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1
           ${size === 'sm' ? 'p-1.5' : 'p-3'}
           ${isPlaying 
-            ? 'bg-indigo-100 text-indigo-600' 
+            ? 'bg-indigo-100 text-indigo-600 animate-pulse' 
             : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800'
           }
         `}
         title="Play Audio"
       >
-        {isLoading ? (
-          <Loader2 size={iconSize} className="animate-spin" />
+        {isPlaying ? (
+          <Volume2 size={iconSize} className="text-indigo-600" />
         ) : (
           <Volume2 size={iconSize} />
         )}
