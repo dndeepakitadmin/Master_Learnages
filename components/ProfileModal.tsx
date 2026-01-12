@@ -1,9 +1,9 @@
-
+// Added missing React import to fix namespace error
 import React, { useEffect, useState } from 'react';
 import {
-  User, LogOut, X, Phone, Mail, Receipt, Loader2,
+  LogOut, X, Phone, Mail, Receipt, Loader2,
   MessageSquare, CreditCard, UserCircle, KeyRound, Check, AlertCircle,
-  Clock, ArrowRight, Zap, RefreshCw
+  Clock, Edit2, Save, Trophy, Eye, EyeOff
 } from 'lucide-react';
 
 import { UserProfile, PaymentHistoryItem, SupportTicket } from '../types';
@@ -27,138 +27,104 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [payments, setPayments] = useState<PaymentHistoryItem[]>([]);
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
 
-  // Password
-  const [showPasswordChange, setShowPasswordChange] = useState(false);
-  const [oldPass, setOldPass] = useState('');
-  const [newPass, setNewPass] = useState('');
-  const [confirmNewPass, setConfirmNewPass] = useState('');
+  // Editor States
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  // Password States
+  const [showPassChange, setShowPassChange] = useState(false);
+  const [passForm, setPassForm] = useState({ current: '', new: '', confirm: '' });
+  const [showPasswords, setShowPasswords] = useState(false);
+  
   const [msg, setMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Load Data
+  const usageValues = user?.usage ? (Object.values(user.usage) as number[]) : [];
+  const totalUsageCount = usageValues.reduce((a: number, b: number) => a + b, 0);
+  const usagePercent = Math.min(100, Math.floor((totalUsageCount / 500) * 100));
+
   useEffect(() => {
     if (isOpen && user?.isAuthenticated) {
-      if (activeTab === 'subscriptions') loadSubscriptions();
-      if (activeTab === 'tickets') loadTickets();
+      setEditName(user.name || '');
+      setEditPhone(user.phone || '');
+      if (activeTab === 'subscriptions') loadData('sub');
+      if (activeTab === 'tickets') loadData('tkt');
     }
-  }, [isOpen, user, activeTab]);
+  }, [isOpen, activeTab, user]);
 
-  const loadSubscriptions = async () => {
+  const loadData = async (type: 'sub' | 'tkt') => {
     setLoading(true);
-    const data = await userService.getPaymentHistory();
-    setPayments(data);
+    if (type === 'sub') setPayments(await userService.getPaymentHistory());
+    else setTickets(await userService.getTicketHistory());
     setLoading(false);
   };
 
-  const loadTickets = async () => {
-    setLoading(true);
-    const data = await userService.getTicketHistory();
-    setTickets(data);
-    setLoading(false);
+  const resolveFullModuleName = (key: string) => {
+    const parts = key.split(/[-→]/).map(p => p.trim());
+    if (parts.length !== 2) return key;
+    const s = LANGUAGES.find(l => l.code === parts[0])?.name || parts[0];
+    const t = LANGUAGES.find(l => l.code === parts[1])?.name || parts[1];
+    return `${s} to ${t}`;
   };
 
-  /**
-   * 🗺️ Resolves "hi → kn" to "Hindi to Kannada"
-   */
-  const resolveFullModuleName = (moduleKey: string) => {
-    const codes = moduleKey.split(' → ');
-    if (codes.length !== 2) return moduleKey;
-    
-    const sourceName = LANGUAGES.find(l => l.code === codes[0])?.name || codes[0];
-    const targetName = LANGUAGES.find(l => l.code === codes[1])?.name || codes[1];
-    
-    return `${sourceName} to ${targetName}`;
-  };
-
-  const formatExpiryDate = (dateStr: string) => {
+  const handleUpdateProfile = async () => {
+    if (!user?.id) return;
+    setProfileLoading(true);
     try {
-      const d = new Date(dateStr);
-      return d.toLocaleString(undefined, { 
-        dateStyle: 'medium', 
-        timeStyle: 'short' 
-      });
-    } catch {
-      return dateStr;
-    }
-  };
-
-  const isExpiringSoon = (dateStr: string) => {
-    const expiry = new Date(dateStr).getTime();
-    const now = Date.now();
-    const diff = expiry - now;
-    return diff > 0 && diff < 172800000; // Less than 48 hours
-  };
-
-  const handleChangePassword = async () => {
-    setMsg(null);
-    if (!oldPass || !newPass || !confirmNewPass) {
-      setMsg({ type: 'error', text: 'All fields are required.' });
-      return;
-    }
-    if (newPass !== confirmNewPass) {
-      setMsg({ type: 'error', text: 'New passwords do not match.' });
-      return;
-    }
-    if (newPass.length < 6) {
-      setMsg({ type: 'error', text: 'Password must be at least 6 characters.' });
-      return;
-    }
-
-    setLoading(true);
-    try {
-      await userService.changePassword(oldPass, newPass);
-      setMsg({ type: 'success', text: 'Password updated successfully!' });
-      setOldPass("");
-      setNewPass("");
-      setConfirmNewPass("");
-      setTimeout(() => setShowPasswordChange(false), 2000);
+      await userService.updateProfile(user.id, { name: editName, phone: editPhone });
+      setMsg({ type: 'success', text: 'Profile updated!' });
+      setIsEditing(false);
     } catch (e: any) {
-      setMsg({ type: 'error', text: e.message || "Failed to update password" });
+      setMsg({ type: 'error', text: e.message || 'Update failed' });
     } finally {
-      setLoading(false);
+      setProfileLoading(false);
+      setTimeout(() => setMsg(null), 3000);
     }
   };
 
-  const generateInvoice = (payment: PaymentHistoryItem) => {
-    const date = payment.created_at ? new Date(payment.created_at) : new Date();
-    const invoiceId = `INV-${payment.id.slice(0, 8)}-${date.getTime().toString().slice(-4)}`;
-    const fullModule = resolveFullModuleName(payment.module);
-    
-    const invoiceHTML = `
-      <html>
-        <head>
-          <title>Invoice ${invoiceId}</title>
-          <style>
-            body { font-family: sans-serif; padding: 40px; color: #333; line-height: 1.6; }
-            .header { border-bottom: 2px solid #1d4683; padding-bottom: 20px; margin-bottom: 30px; }
-            .title { font-size: 24px; font-weight: bold; color: #1d4683; }
-            .row { display: flex; justify-content: space-between; margin-bottom: 10px; }
-            .footer { margin-top: 50px; font-size: 12px; color: #777; border-top: 1px solid #eee; padding-top: 20px; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="title">LEARNAGES PRO INVOICE</div>
-            <p>ID: ${invoiceId}</p>
-          </div>
-          <div class="row"><strong>User:</strong> <span>${user?.name || user?.email}</span></div>
-          <div class="row"><strong>Subscription Module:</strong> <span>${fullModule}</span></div>
-          <div class="row"><strong>Date of Purchase:</strong> <span>${date.toLocaleDateString()}</span></div>
-          <div class="row"><strong>Amount Paid:</strong> <span>₹${PRICE_INR}</span></div>
-          <div class="row"><strong>Access Expiry:</strong> <span>${formatExpiryDate(payment.expiry)}</span></div>
-          <div class="footer">
-            Thank you for choosing Learnages. This is a computer-generated document.
-          </div>
-          <script>window.print()</script>
-        </body>
-      </html>
-    `;
-
-    const win = window.open('', '_blank');
-    if (win) {
-      win.document.write(invoiceHTML);
-      win.document.close();
+  const handlePasswordChange = async () => {
+    if (!passForm.current || !passForm.new || !passForm.confirm) {
+        setMsg({ type: 'error', text: 'All fields are required.' });
+        return;
     }
+    if (passForm.new !== passForm.confirm) {
+        setMsg({ type: 'error', text: 'New passwords do not match.' });
+        return;
+    }
+    if (passForm.new.length < 6) {
+        setMsg({ type: 'error', text: 'Password must be at least 6 characters.' });
+        return;
+    }
+
+    setLoading(true);
+    try {
+        await userService.changePassword(passForm.current, passForm.new);
+        setMsg({ type: 'success', text: 'Password updated successfully!' });
+        setPassForm({ current: '', new: '', confirm: '' });
+        setShowPassChange(false);
+    } catch (e: any) {
+        setMsg({ type: 'error', text: e.message || 'Failed to update password.' });
+    } finally {
+        setLoading(false);
+        setTimeout(() => setMsg(null), 4000);
+    }
+  };
+
+  const ProgressRing = ({ percent }: { percent: number }) => {
+    const radius = 35;
+    const circumference = radius * 2 * Math.PI;
+    const offset = circumference - (percent / 100) * circumference;
+    return (
+      <div className="relative flex items-center justify-center">
+        <svg height="80" width="80">
+          <circle stroke="#e2e8f0" strokeWidth="6" fill="transparent" r={radius} cx="40" cy="40"/>
+          <circle stroke="#bf953f" strokeWidth="6" strokeDasharray={circumference + ' ' + circumference} style={{ strokeDashoffset: offset }} strokeLinecap="round" fill="transparent" r={radius} cx="40" cy="40" className="progress-ring__circle" />
+        </svg>
+        <div className="absolute text-[10px] font-black text-slate-800">{percent}%</div>
+      </div>
+    );
   };
 
   if (!isOpen || !user) return null;
@@ -166,229 +132,148 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-
       <div className="relative bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md max-h-[85vh] overflow-hidden flex flex-col animate-in zoom-in-95">
-
-        {/* HEADER */}
-        <div className="bg-[#1d4683] p-8 flex flex-col items-center relative shrink-0">
-          <button onClick={onClose} className="absolute top-6 right-6 text-white/50 hover:text-white transition-colors">
-            <X size={24} />
-          </button>
-
-          <div className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center shadow-inner border border-white/20 mb-4">
-            <UserCircle size={48} className="text-white" />
+        
+        <div className={`p-8 flex flex-col items-center relative shrink-0 ${user.subscriptions && Object.keys(user.subscriptions).length > 0 ? 'bg-premium text-slate-900' : 'bg-[#1d4683] text-white'}`}>
+          <button onClick={onClose} className="absolute top-6 right-6 opacity-50 hover:opacity-100"><X size={24} /></button>
+          <div className="flex items-center gap-6 mb-4">
+             <div className="w-16 h-16 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20">
+                <UserCircle size={40} />
+             </div>
+             {user.usage && <ProgressRing percent={usagePercent} />}
           </div>
-
-          <h2 className="text-2xl font-black text-white tracking-tight">
-            {user.name || 'Learner'}
-          </h2>
-          <p className="text-blue-200 text-xs font-black uppercase tracking-widest mt-1">Platform Account</p>
+          <h2 className="text-2xl font-black tracking-tight">{user.name || 'Learner'}</h2>
+          <p className="text-xs font-black uppercase tracking-widest opacity-70">
+            Tier: {Object.keys(user.subscriptions || {}).length > 0 ? 'Expert' : 'Seeker'}
+          </p>
         </div>
 
-        {/* TABS */}
-        {user.isAuthenticated && (
-          <div className="flex border-b bg-slate-50/50">
-            <button
-              onClick={() => setActiveTab('info')}
-              className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest border-b-4 transition-all ${
-                activeTab === 'info' ? 'border-[#1d4683] text-[#1d4683]' : 'border-transparent text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              Info
-            </button>
-            <button
-              onClick={() => setActiveTab('subscriptions')}
-              className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest border-b-4 transition-all ${
-                activeTab === 'subscriptions' ? 'border-[#1d4683] text-[#1d4683]' : 'border-transparent text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              Subscriptions
-            </button>
-            <button
-              onClick={() => setActiveTab('tickets')}
-              className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest border-b-4 transition-all ${
-                activeTab === 'tickets' ? 'border-[#1d4683] text-[#1d4683]' : 'border-transparent text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              Support
-            </button>
-          </div>
-        )}
+        <div className="flex border-b bg-slate-50/50">
+          {['info', 'subscriptions', 'tickets'].map((t: any) => (
+            <button key={t} onClick={() => setActiveTab(t)} className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest border-b-4 transition-all ${activeTab === t ? 'border-[#1d4683] text-[#1d4683]' : 'border-transparent text-slate-400'}`}>{t}</button>
+          ))}
+        </div>
 
-        {/* BODY */}
-        <div className="p-6 overflow-y-auto flex-1">
-
+        <div className="p-6 overflow-y-auto flex-1 space-y-6">
           {activeTab === 'info' && (
-            <div className="space-y-6">
-              {user.isAuthenticated ? (
-                <>
-                  <div className="space-y-3">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Connected Credentials</p>
-                    <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                      <Mail size={18} className="text-slate-400" />
-                      <span className="text-sm text-slate-700 font-bold">{user.email}</span>
-                    </div>
-                    <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                      <Phone size={18} className="text-slate-400" />
-                      <span className="text-sm text-slate-700 font-bold">{user.phone}</span>
-                    </div>
-                  </div>
+            <>
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-black text-slate-400 uppercase">Profile Engine</span>
+                  {!isEditing ? (
+                    <button onClick={() => setIsEditing(true)} className="text-[10px] font-black text-indigo-600 uppercase flex items-center gap-1"><Edit2 size={12}/> Edit</button>
+                  ) : (
+                    <button onClick={handleUpdateProfile} disabled={profileLoading} className="text-[10px] font-black text-green-600 uppercase flex items-center gap-1">{profileLoading ? <Loader2 size={12} className="animate-spin"/> : <Save size={12}/>} Save</button>
+                  )}
+                </div>
+                
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center gap-4">
+                  <Mail size={18} className="text-slate-300"/>
+                  <span className="text-sm font-bold text-slate-400">{user.email}</span>
+                </div>
 
-                  <div className="pt-2">
-                    <button
-                      onClick={() => {
-                        setShowPasswordChange(!showPasswordChange);
-                        setMsg(null);
-                        setOldPass("");
-                        setNewPass("");
-                        setConfirmNewPass("");
-                      }}
-                      className="text-xs font-black uppercase tracking-wider text-[#1d4683] flex items-center gap-2 hover:underline"
+                <div className={`p-4 rounded-2xl border transition-all ${isEditing ? 'bg-white border-indigo-200 ring-2 ring-indigo-50' : 'bg-slate-50 border-slate-100'} flex items-center gap-4`}>
+                  <UserCircle size={18} className={isEditing ? 'text-indigo-600' : 'text-slate-300'}/>
+                  {isEditing ? <input value={editName} onChange={e => setEditName(e.target.value)} className="w-full text-sm font-bold bg-transparent outline-none"/> : <span className="text-sm font-bold text-slate-700">{user.name}</span>}
+                </div>
+
+                <div className={`p-4 rounded-2xl border transition-all ${isEditing ? 'bg-white border-indigo-200 ring-2 ring-indigo-50' : 'bg-slate-50 border-slate-100'} flex items-center gap-4`}>
+                  <Phone size={18} className={isEditing ? 'text-indigo-600' : 'text-slate-300'}/>
+                  {isEditing ? <input value={editPhone} onChange={e => setEditPhone(e.target.value)} className="w-full text-sm font-bold bg-transparent outline-none" placeholder="Add Phone"/> : <span className="text-sm font-bold text-slate-700">{user.phone || 'Set Phone'}</span>}
+                </div>
+              </div>
+
+              {msg && <div className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 ${msg.type === 'success' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}><AlertCircle size={14}/> {msg.text}</div>}
+
+              <button 
+                onClick={() => { setShowPassChange(!showPassChange); setMsg(null); }} 
+                className="text-xs font-black uppercase text-[#1d4683] flex items-center gap-2 hover:underline"
+              >
+                <KeyRound size={14}/> Update Password
+              </button>
+              
+              {showPassChange && (
+                <div className="space-y-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 animate-in fade-in slide-in-from-top-2">
+                  <div className="relative">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Present Password</label>
+                    <input 
+                      type={showPasswords ? "text" : "password"} 
+                      placeholder="Enter current password" 
+                      value={passForm.current} 
+                      onChange={e => setPassForm({...passForm, current: e.target.value})} 
+                      className="w-full p-3 text-sm rounded-xl border outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    />
+                  </div>
+                  <div className="relative">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">New Password</label>
+                    <input 
+                      type={showPasswords ? "text" : "password"} 
+                      placeholder="Min 6 characters" 
+                      value={passForm.new} 
+                      onChange={e => setPassForm({...passForm, new: e.target.value})} 
+                      className="w-full p-3 text-sm rounded-xl border outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    />
+                  </div>
+                  <div className="relative">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Confirm New Password</label>
+                    <input 
+                      type={showPasswords ? "text" : "password"} 
+                      placeholder="Repeat new password" 
+                      value={passForm.confirm} 
+                      onChange={e => setPassForm({...passForm, confirm: e.target.value})} 
+                      className="w-full p-3 text-sm rounded-xl border outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 px-1">
+                    <button 
+                      onClick={() => setShowPasswords(!showPasswords)} 
+                      className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-1"
                     >
-                      <KeyRound size={14} /> Change Access Password
+                      {showPasswords ? <EyeOff size={12}/> : <Eye size={12}/>} {showPasswords ? 'Hide' : 'Show'} Characters
                     </button>
-
-                    {showPasswordChange && (
-                      <div className="mt-4 bg-slate-50 p-6 rounded-3xl border border-slate-200 space-y-4 shadow-inner">
-                        <input
-                          type="password"
-                          placeholder="Current Password"
-                          value={oldPass}
-                          onChange={(e) => setOldPass(e.target.value)}
-                          className="w-full p-3 border border-slate-200 rounded-xl bg-white text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                        <input
-                          type="password"
-                          placeholder="New Password"
-                          value={newPass}
-                          onChange={(e) => setNewPass(e.target.value)}
-                          className="w-full p-3 border border-slate-200 rounded-xl bg-white text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                        <input
-                          type="password"
-                          placeholder="Confirm New Password"
-                          value={confirmNewPass}
-                          onChange={(e) => setConfirmNewPass(e.target.value)}
-                          className="w-full p-3 border border-slate-200 rounded-xl bg-white text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-
-                        {msg && (
-                          <div className={`text-xs p-3 rounded-xl flex items-center gap-2 font-bold ${msg.type === 'error' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
-                            {msg.type === 'error' ? <AlertCircle size={14} /> : <Check size={14} />}
-                            {msg.text}
-                          </div>
-                        )}
-
-                        <button
-                          onClick={handleChangePassword}
-                          disabled={loading}
-                          className="w-full bg-[#1d4683] text-white rounded-xl py-3 text-xs font-black uppercase hover:bg-black transition-all disabled:opacity-50"
-                        >
-                          {loading ? <Loader2 className="animate-spin mx-auto" size={16}/> : 'Update Password'}
-                        </button>
-                      </div>
-                    )}
                   </div>
-
-                  <button
-                    onClick={onLogout}
-                    className="w-full mt-8 py-4 bg-red-50 text-red-600 font-black uppercase tracking-widest text-[10px] rounded-2xl border border-red-100 hover:bg-red-100 flex items-center justify-center gap-2 transition-colors"
+                  <button 
+                    onClick={handlePasswordChange} 
+                    disabled={loading}
+                    className="w-full py-3 bg-[#1d4683] text-white rounded-xl text-xs font-black uppercase flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all"
                   >
-                    <LogOut size={16} /> Sign Out of Engine
+                    {loading ? <Loader2 size={14} className="animate-spin" /> : <Save size={14}/>} Update Password
                   </button>
-                </>
-              ) : (
-                <div className="text-center py-12">
-                  <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest">Guest Context Only</p>
                 </div>
               )}
-            </div>
+
+              <button onClick={onLogout} className="w-full py-4 bg-red-50 text-red-600 font-black uppercase text-[10px] rounded-2xl border border-red-100 hover:bg-red-100 flex items-center justify-center gap-2 transition-colors">
+                <LogOut size={16}/> Sign Out
+              </button>
+            </>
           )}
 
           {activeTab === 'subscriptions' && (
             <div className="space-y-4">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-4">Active Modules & Passes</p>
-              {loading ? (
-                <div className="flex justify-center py-12"><Loader2 className="animate-spin text-slate-200" size={32} /></div>
-              ) : (
-                payments.map((p) => {
-                  const expiring = isExpiringSoon(p.expiry);
-                  return (
-                    <div key={p.id} className={`p-5 border bg-white rounded-3xl flex flex-col gap-4 shadow-sm hover:shadow-md transition-all ${expiring ? 'border-amber-200 ring-1 ring-amber-50' : 'border-slate-100'}`}>
-                      <div className="flex justify-between items-start">
-                          <div>
-                              <h4 className="text-sm font-black text-slate-900 leading-none mb-1.5">{resolveFullModuleName(p.module)}</h4>
-                              <div className={`flex items-center gap-1.5 ${expiring ? 'text-amber-600' : 'text-indigo-600'}`}>
-                                  <Clock size={12} />
-                                  <span className="text-[10px] font-bold">Expires: {formatExpiryDate(p.expiry)}</span>
-                              </div>
-                          </div>
-                          {expiring ? (
-                             <div className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-tighter animate-pulse">Expiring Soon</div>
-                          ) : (
-                             <div className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-tighter">Pro Active</div>
-                          )}
-                      </div>
-
-                      {expiring && (
-                        <div className="bg-amber-50/50 p-3 rounded-2xl flex items-center justify-between gap-3 border border-amber-100">
-                           <p className="text-[9px] font-bold text-amber-800 leading-tight">Access ending soon. Extend your journey to keep learning without limits.</p>
-                           <button onClick={onClose} className="shrink-0 bg-amber-600 text-white px-3 py-1.5 rounded-full text-[9px] font-black uppercase hover:bg-black transition-all">Renew Access</button>
-                        </div>
-                      )}
-
-                      <div className="flex justify-between items-center pt-3 border-t border-slate-50">
-                          <span className="text-[9px] text-slate-400 font-bold uppercase tracking-tight">Status: Professional</span>
-                          <button
-                            onClick={() => generateInvoice(p)}
-                            className="text-[#1d4683] text-[10px] font-black uppercase flex items-center gap-1.5 hover:underline"
-                          >
-                            <Receipt size={14} /> View Invoice
-                          </button>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-
-              {!loading && payments.length === 0 && (
-                <div className="text-center py-12 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
-                    <CreditCard size={32} className="text-slate-200 mx-auto mb-2" />
-                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">No Active Subscriptions</p>
+              {payments.map(p => (
+                <div key={p.id} className="p-5 border rounded-3xl space-y-3 bg-white shadow-sm border-slate-100">
+                  <div className="flex justify-between items-start">
+                    <h4 className="text-sm font-black text-slate-800">{resolveFullModuleName(p.module)}</h4>
+                    <div className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-[8px] font-black uppercase">Active</div>
+                  </div>
+                  <div className="flex items-center gap-2 text-[10px] text-slate-400 font-bold"><Clock size={12}/> Valid: {new Date(p.expiry).toLocaleDateString()}</div>
                 </div>
-              )}
+              ))}
+              {payments.length === 0 && <div className="text-center py-10 opacity-30 font-black text-xs uppercase tracking-widest"><CreditCard size={32} className="mx-auto mb-2"/> No active modules</div>}
             </div>
           )}
 
-          {activeTab === 'tickets' && (activeTab === 'tickets' && (
+          {activeTab === 'tickets' && (
             <div className="space-y-3">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-4">Support Inquiries</p>
-              {loading ? (
-                <div className="flex justify-center py-12"><Loader2 className="animate-spin text-slate-200" size={32} /></div>
-              ) : (
-                tickets.map((t) => (
-                  <div key={t.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-[10px] font-black text-[#1d4683] uppercase tracking-tighter">REF: {t.id.slice(0, 8)}</span>
-                      <span className="text-[9px] text-slate-400 font-bold">{new Date(t.created_at || '').toLocaleDateString()}</span>
-                    </div>
-                    <p className="text-xs text-slate-700 font-medium leading-relaxed">{t.message}</p>
-                    <div className="mt-3 pt-3 border-t border-slate-200/50 flex justify-end">
-                        <span className="text-[8px] font-black uppercase text-amber-600 bg-amber-50 px-2 py-0.5 rounded">Processing</span>
-                    </div>
-                  </div>
-                ))
-              )}
-
-              {!loading && tickets.length === 0 && (
-                 <div className="text-center py-12">
-                    <MessageSquare size={32} className="text-slate-100 mx-auto mb-2" />
-                    <p className="text-[10px] text-slate-300 font-black uppercase tracking-widest">No support logs</p>
-                 </div>
-              )}
+              {tickets.map(t => (
+                <div key={t.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                  <div className="flex justify-between text-[10px] font-black text-[#1d4683] uppercase mb-2"><span>Ref: {t.id.slice(0,8)}</span><span className="text-slate-400">{new Date(t.created_at || '').toLocaleDateString()}</span></div>
+                  <p className="text-xs text-slate-700 font-medium">{t.message}</p>
+                </div>
+              ))}
+              {tickets.length === 0 && <div className="text-center py-10 opacity-30 font-black text-xs uppercase tracking-widest"><MessageSquare size={32} className="mx-auto mb-2"/> No inquiry logs</div>}
             </div>
-          ))}
-
+          )}
         </div>
       </div>
     </div>

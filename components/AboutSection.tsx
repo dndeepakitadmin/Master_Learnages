@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { 
   Globe2, CheckCircle2,
@@ -90,6 +89,20 @@ export const AboutSection: React.FC = () => {
                 </div>
             ))}
         </div>
+      </section>
+
+      <section className="text-center pt-10 border-t border-slate-100 mt-12">
+        <p className="text-sm text-slate-500 mb-2">
+          © {new Date().getFullYear()} Learnages. All rights reserved.
+        </p>
+        <a 
+          href="https://www.learnages.in/" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          className="text-sm text-[#1d4683] hover:underline font-medium"
+        >
+          Privacy Policy
+        </a>
       </section>
 
     </div>

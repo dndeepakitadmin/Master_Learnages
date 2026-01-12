@@ -22,6 +22,15 @@ const COUNTRY_CODES = [
   { code: '+65', label: '🇸🇬 +65' }
 ];
 
+const GoogleIcon = () => (
+    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M22.56 12.25C22.56 11.45 22.49 10.68 22.36 9.93H12V14.1H18.17C17.91 15.65 17.06 16.93 15.82 17.77V20.34H19.61C21.6 18.44 22.56 15.63 22.56 12.25Z" fill="#4285F4"/>
+      <path d="M12 23C15.03 23 17.58 21.99 19.61 20.34L15.82 17.77C14.77 18.48 13.49 18.93 12 18.93C9.07 18.93 6.59 16.94 5.68 14.38H1.75V17.04C3.75 20.94 7.59 23 12 23Z" fill="#34A853"/>
+      <path d="M5.68 14.38C5.43 13.67 5.3 12.87 5.3 12C5.3 11.13 5.43 10.33 5.68 9.62V6.96H1.75C0.9 8.59 0.44 10.25 0.44 12C0.44 13.75 0.9 15.41 1.75 17.04L5.68 14.38Z" fill="#FBBC05"/>
+      <path d="M12 5.07C13.61 5.07 15.11 5.64 16.23 6.7L19.69 3.24C17.58 1.24 15.03 0 12 0C7.59 0 3.75 2.06 1.75 5.96L5.68 8.62C6.59 6.06 9.07 4.07 12 4.07V5.07Z" fill="#EA4335"/>
+    </svg>
+);
+
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess }) => {
   const [mode, setMode] = useState<'login' | 'register' | 'forgot'>('login');
   const [loginMethod, setLoginMethod] = useState<'mobile' | 'email'>('mobile');
@@ -63,6 +72,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const handleGoogleLogin = async () => {
+    setIsLoading(true);
+    setError('');
+    
+    // Explicitly clean origin to ensure it matches whitelisted URL in Supabase dashboard
+    const redirectUrl = window.location.origin.endsWith('/') 
+      ? window.location.origin 
+      : `${window.location.origin}/`;
+
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+        }
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      setError(err.message);
+      setIsLoading(false);
+    }
+  };
 
   const handleLogin = async () => {
     setIsLoading(true);
@@ -270,6 +302,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         <div className="p-6 space-y-4">
           {error && <p className="text-xs bg-red-50 text-red-600 p-3 rounded-xl border border-red-100 text-center font-medium">{error}</p>}
           {message && <p className="text-xs bg-green-50 text-green-600 p-3 rounded-xl border border-green-100 text-center font-bold">{message}</p>}
+          
+          {(mode === 'login' || mode === 'register') && (
+            <>
+              <button
+                onClick={handleGoogleLogin}
+                disabled={isLoading}
+                className="w-full bg-white border-2 border-slate-200 text-slate-700 font-bold py-3.5 rounded-xl hover:bg-slate-50 transition-all active:scale-[0.98] flex justify-center items-center gap-3"
+              >
+                <GoogleIcon />
+                Sign in with Google
+              </button>
+              <div className="relative py-1">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-slate-200"></div>
+                </div>
+                <div className="relative flex justify-center">
+                  <span className="bg-white px-2 text-xs text-slate-400 font-bold uppercase">Or</span>
+                </div>
+              </div>
+            </>
+          )}
 
           {mode === 'login' && (
             <>

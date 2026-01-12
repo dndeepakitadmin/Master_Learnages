@@ -1,13 +1,11 @@
-
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { LANGUAGES, DEFAULT_SOURCE_LANG, DEFAULT_TARGET_LANG, LIMIT_STUDY, LIMIT_CHARS } from './constants';
-import { TranslationResult, UserProfile, LessonResponse, LessonItem } from './types';
+import { LANGUAGES, DEFAULT_SOURCE_LANG, DEFAULT_TARGET_LANG, LIMIT_STUDY, LIMIT_CHARS, LIMIT_CHATS, LIMIT_QUIZZES, APP_VERSION } from './constants';
+import { TranslationResult, UserProfile, LessonResponse, LessonItem, MatrixEntry, MatrixLangData } from './types';
 import { translateText, generateLessons } from './services/geminiService';
 import { cacheService } from './services/cacheService';
-import { userService } from './services/userService';
+import { userService, getModuleKey } from './services/userService';
 import { isTransliterationSupported, transliterateWord } from './services/transliterationService';
 import { AudioPlayer } from './components/AudioPlayer';
-import { Flashcard } from './components/Flashcard';
 import { ChatInterface } from './components/ChatInterface';
 import { QuizInterface } from './components/QuizInterface';
 import { AboutSection } from './components/AboutSection';
@@ -15,13 +13,16 @@ import { SubscriptionModal } from './components/SubscriptionModal';
 import { AuthModal } from './components/AuthModal';
 import { ProfileModal } from './components/ProfileModal';
 import { SupportModal } from './components/SupportModal';
+import { PhraseDetailModal } from './components/PhraseDetailModal';
 import { Navbar } from './components/Navbar';
 import { MASTER_DICTIONARY } from './data/masterDictionary';
 import {
   ArrowRightLeft, Loader2, Lock, Check,
   BookOpen, Sparkles, Zap, ArrowRight, MousePointer2,
-  RefreshCw, Keyboard, Type, ChevronDown,
-  Info, Sparkle, Laptop, X, Save, CheckCircle
+  RefreshCw, Keyboard, Type, ChevronDown, ThumbsUp,
+  Info, Sparkle, Laptop, X, Save, CheckCircle, Database, AlertCircle, Key, Globe2,
+  CloudLightning, Globe, Users, CheckCircle2, Share2, Wrench, FolderOpen, LayoutGrid, Library, ChevronDownCircle,
+  Trophy
 } from 'lucide-react';
 
 type Tab = 'translate' | 'chat' | 'quiz' | 'about';
@@ -44,23 +45,28 @@ const App: React.FC = () => {
   const [showSubModal, setShowSubModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
+  
+  const [isSubscribePending, setIsSubscribePending] = useState(false);
+  const [selectedPhrase, setSelectedPhrase] = useState<LessonItem | null>(null);
 
   const [inputText, setInputText] = useState('');
+  const [inputLatinBuffer, setInputLatinBuffer] = useState(''); 
   const [isTranslating, setIsTranslating] = useState(false);
   const [result, setResult] = useState<TranslationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'searching' | 'found' | 'saved'>('idle');
 
   const [lessonsData, setLessonsData] = useState<LessonResponse | null>(null);
   const [isLoadingLessons, setIsLoadingLessons] = useState(false);
 
-  const [suggestionsEnabled, setSuggestionsEnabled] = useState(true);
   const [smartTypingMode, setSmartTypingMode] = useState(true); 
   const [showInputTools, setShowInputTools] = useState(false);
-  const [activeSuggestions, setActiveSuggestions] = useState<LessonItem[]>([]);
-  
-  // ⌨️ Phonetic Buffer States (Internal only, no preview)
   const [wordBuffer, setWordBuffer] = useState('');
+  const [verified, setVerified] = useState(false);
+
+  const [currentSuggestions, setCurrentSuggestions] = useState<LessonItem[]>([]);
+  const [newVersionAvailable, setNewVersionAvailable] = useState(false);
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const syncUser = useCallback(async (skipHeavySeeding = false) => {
@@ -70,37 +76,26 @@ const App: React.FC = () => {
       }
       const user = await userService.getCurrentUser();
       setUserProfile(user);
-      
       const status = await userService.getModuleStatus(sourceLang, targetLang);
       setModuleStatus(status as any);
+      
+      if (user.isAuthenticated && isSubscribePending) {
+        setIsSubscribePending(false);
+        setShowSubModal(true);
+      }
     } catch (e) {
       console.warn("Init failed.");
     } finally {
       setIsInitialLoading(false);
     }
-  }, [sourceLang, targetLang]);
+  }, [sourceLang, targetLang, isSubscribePending]);
 
   useEffect(() => { syncUser(); }, [syncUser]);
 
-  const isExpiringSoon = useMemo(() => {
-    if (!moduleStatus.isPro || !moduleStatus.expiry) return false;
-    const diff = moduleStatus.expiry - Date.now();
-    return diff > 0 && diff < 172800000;
-  }, [moduleStatus]);
-
-  useEffect(() => {
-    if (appMode === 'indian_kannadiga') {
-      setTargetLang('kn');
-      if (sourceLang === 'kn') setSourceLang('hi');
-    } else if (appMode === 'kannadiga_indian') {
-      setSourceLang('kn');
-      if (targetLang === 'kn') setTargetLang('hi');
-    }
-  }, [appMode, sourceLang, targetLang]);
-
-  const loadLessons = useCallback(async () => {
+  const loadLessons = useCallback(async (overrideProStatus?: boolean) => {
       setIsLoadingLessons(true);
-      const tier = moduleStatus.isPro ? 'premium' : 'free';
+      const currentPro = overrideProStatus !== undefined ? overrideProStatus : moduleStatus.isPro;
+      const tier = currentPro ? 'premium' : 'free';
       try {
         const data = await generateLessons(sourceLang, targetLang, tier, getLangName(sourceLang), getLangName(targetLang));
         setLessonsData(data);
@@ -112,490 +107,397 @@ const App: React.FC = () => {
     if (!isInitialLoading) loadLessons();
   }, [loadLessons, isInitialLoading]);
 
-  const triggerSubscribe = useCallback(() => {
-    if (!moduleStatus.isAuthenticated) setShowAuthModal(true);
-    else setShowSubModal(true);
-  }, [moduleStatus.isAuthenticated]);
-
-  const handleSubscribe = useCallback(async (days: number, paymentId: string) => {
-    try {
-      await userService.subscribeToModule(sourceLang, targetLang, days);
-      await syncUser(true);
-    } catch (e) {
-      console.error("Subscription sync failed:", e);
+  // Version Check Logic
+  useEffect(() => {
+    const storedVersion = localStorage.getItem('app_version');
+    if (storedVersion && storedVersion !== APP_VERSION) {
+      setNewVersionAvailable(true);
+    } else if (!storedVersion) {
+      localStorage.setItem('app_version', APP_VERSION);
     }
-  }, [sourceLang, targetLang, syncUser]);
+  }, []);
 
-  /**
-   * 🧠 AUTO-LEARNING ENGINE
-   * Automatically persists the AI result into the Supabase user_lessons table.
-   */
-  const autoSaveToGlobalDB = async (data: TranslationResult) => {
-    try {
-        await userService.saveUserLesson(
-            data.originalText,
-            data.translatedText,
-            data.pronunciationSourceScript || '',
-            sourceLang,
-            targetLang
-        );
-        // Silently refresh internal lesson data to include the newly learned phrase
-        const updatedLessons = await generateLessons(sourceLang, targetLang, moduleStatus.isPro ? 'premium' : 'free', getLangName(sourceLang), getLangName(targetLang));
-        setLessonsData(updatedLessons);
-    } catch (e) { /* silent fail for background auto-save */ }
+  const handleVersionRefresh = () => {
+    localStorage.setItem('app_version', APP_VERSION);
+    window.location.reload();
   };
 
-  const handleTranslate = useCallback(async (forcedText?: string) => {
-    const textToUse = (forcedText || inputText).trim();
+  // Behavior & Locking Rules
+  useEffect(() => {
+    if (appMode === 'indian_kannadiga') {
+      setTargetLang('kn');
+      if (sourceLang === 'kn') setSourceLang('hi');
+    } else if (appMode === 'kannadiga_indian') {
+      setSourceLang('kn');
+      if (targetLang === 'kn') setTargetLang('hi');
+    }
+  }, [appMode]);
+
+  // Suggestions Logic: Mandatory 3-character trigger & Strict prefix matching from char 0
+  useEffect(() => {
+    // UNIFIED COMPARISON REPRESENTATION: Use Native script as the base for all languages
+    const totalInputNative = sourceLang === 'en' 
+      ? inputText 
+      : inputText + transliterateWord(wordBuffer, sourceLang);
+
+    // Trigger Rule: Suggestions MUST NOT appear before 3 characters. MUST appear at 3rd character.
+    if (totalInputNative.length < 3) {
+      setCurrentSuggestions([]);
+      return;
+    }
+
+    // Normalization for robust character-by-character prefix matching (ignoring punctuation)
+    const normalizeForMatch = (s: string) => s.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()!?]/g, "").trim();
+    const prefix = normalizeForMatch(totalInputNative);
+
+    // Source 1: Dictionary suggestions (Filtered letter-wise from character 0)
+    const dictionaryMatches = MASTER_DICTIONARY.filter(ph => {
+      const ld = ph.langs[sourceLang];
+      if (!ld || !ld.native) return false;
+      const sentence = normalizeForMatch(ld.native);
+      return sentence.startsWith(prefix);
+    }).map(ph => ({
+      source_native: ph.langs[sourceLang].native,
+      source_transliteration: ph.langs[sourceLang].latin,
+      target_native: ph.langs[targetLang]?.native || '',
+      target_transliteration: ph.langs[targetLang]?.latin || '',
+      target_in_source_script: ph.langs[targetLang]?.b?.[sourceLang] || '',
+      meaning_english: ph.en_meaning,
+      note: ph.category
+    }));
+
+    // Source 2: Database suggestions (Filtered letter-wise from character 0)
+    const lessonMatches = (lessonsData?.lessons || []).filter(l => {
+      const sentence = normalizeForMatch(l.source_native);
+      return sentence.startsWith(prefix);
+    });
+
+    // Merge + dedupe results from both sources simultaneously
+    const combined = [...lessonMatches, ...dictionaryMatches]
+      .filter((v, i, a) => a.findIndex(t => t.source_native === v.source_native) === i)
+      .slice(0, 15);
+
+    setCurrentSuggestions(combined as LessonItem[]);
+  }, [inputText, wordBuffer, sourceLang, targetLang, lessonsData]);
+
+  const handleTranslate = useCallback(async (forcedText?: string, bypassCache: boolean = false) => {
+    let textToUse = (forcedText || inputText).trim();
     if (!textToUse) return;
-    
-    // 1. Search Knowledge Deck (Static + Shared DB) for exact match
-    const exactMatch = lessonsData?.lessons.find(l => 
-      l.source_native.toLowerCase().trim() === textToUse.toLowerCase()
-    );
-
-    if (exactMatch) {
-      // Local hits still count towards trial usage for guests
-      if (!moduleStatus.isPro) {
-        const newCount = await userService.incrementUsage(sourceLang, targetLang, textToUse.length, 'chars');
-        setModuleStatus(prev => ({ ...prev, usageChars: newCount }));
-      }
-
-      setResult({
-        originalText: exactMatch.source_native,
-        translatedText: exactMatch.target_native,
-        pronunciationSourceScript: exactMatch.target_in_source_script,
-        pronunciationLatin: exactMatch.target_transliteration,
-        sourceLanguage: sourceLang,
-        targetLanguage: targetLang,
-        words: []
-      });
-      setActiveSuggestions([]);
-      setError(null);
-      setSaveStatus('saved'); // Already exists in shared DB
-      return;
-    }
-
-    // 2. Check trial limits for API calls
     if (!moduleStatus.isPro && (moduleStatus.usageChars + textToUse.length) > LIMIT_CHARS) {
-      if (!forcedText) triggerSubscribe();
+      if (!forcedText) { 
+        setIsSubscribePending(true); 
+        setShowAuthModal(true); 
+      }
       return;
     }
 
-    // 3. Perform AI Translation
     setIsTranslating(true);
     setError(null);
-    setActiveSuggestions([]); 
-    setSaveStatus('idle');
+    setVerified(false);
     
     try {
-      const data = await translateText(textToUse, sourceLang, targetLang);
+      const data = await translateText(textToUse, sourceLang, targetLang, bypassCache);
+      const localBridge = transliterateWord(data.pronunciationLatin || '', sourceLang);
+      data.pronunciationSourceScript = localBridge;
       setResult(data);
-      
-      // 🚀 AUTO-SAVE: Immediately send the new translation to Supabase table
-      autoSaveToGlobalDB(data);
-      setSaveStatus('saved');
+
+      if (data.en_anchor && data.matrix) {
+        const finalMatrix = { ...data.matrix };
+        if (inputLatinBuffer.length > 2) finalMatrix[sourceLang] = { n: textToUse, l: inputLatinBuffer };
+        await userService.saveMatrixEntry({ en_anchor: data.en_anchor!, category: data.category || 'Collective Intelligence', matrix_data: finalMatrix });
+        await userService.saveUserLesson(data.originalText, data.translatedText, localBridge, sourceLang, targetLang, data.category);
+        setSaveStatus('saved');
+      }
 
       if (!moduleStatus.isPro) {
         const newCount = await userService.incrementUsage(sourceLang, targetLang, textToUse.length, 'chars');
         setModuleStatus(prev => ({ ...prev, usageChars: newCount }));
       }
     } catch (err: any) { 
-      setError(err.message); 
+      setError(err.message || "Intelligence is busy."); 
     } finally { 
       setIsTranslating(false); 
     }
-  }, [inputText, sourceLang, targetLang, moduleStatus, triggerSubscribe, lessonsData]);
+  }, [inputText, inputLatinBuffer, sourceLang, targetLang, moduleStatus]);
 
-  /**
-   * ⌨️ SMART PHONETIC ENGINE (NO PREVIEW BAR)
-   */
-  const currentTransliteration = useMemo(() => {
-    return transliterateWord(wordBuffer, sourceLang);
-  }, [wordBuffer, sourceLang]);
-
-  const commitBuffer = useCallback(() => {
-    if (!wordBuffer) return;
-    setInputText(prev => prev + currentTransliteration + ' ');
+  const insertTextAtCursor = (textToInsert: string, rawPhonetic: string) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    
+    // Selecting a sentence suggestion replaces the typed prefix with the complete verified phrase
+    setInputText(textToInsert);
     setWordBuffer('');
-  }, [wordBuffer, currentTransliteration]);
+    
+    if (sourceLang !== 'en') {
+      setInputLatinBuffer(rawPhonetic);
+    } else {
+      setInputLatinBuffer('');
+    }
+
+    setTimeout(() => {
+      el.focus();
+      el.selectionStart = el.selectionEnd = textToInsert.length;
+    }, 0);
+  };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!smartTypingMode) return;
-    if (e.ctrlKey || e.altKey || e.metaKey) return;
-    
+    if (!smartTypingMode || sourceLang === 'en') return;
+    const el = textareaRef.current;
+    if (e.ctrlKey || e.metaKey) return;
+    if (e.key === 'Backspace') { if (wordBuffer) { e.preventDefault(); setWordBuffer(prev => prev.slice(0, -1)); } return; }
     if (e.key === ' ' || e.key === 'Enter') {
-        if (wordBuffer) {
-            e.preventDefault();
-            commitBuffer();
-        }
-        return;
-    }
-
-    if (e.key === 'Backspace') {
-        if (wordBuffer) {
-            e.preventDefault();
-            setWordBuffer(prev => prev.slice(0, -1));
-        } else if (inputText.length > 0) {
-            e.preventDefault();
-            setInputText(prev => prev.slice(0, -1));
-        }
-        return;
-    }
-
-    if (e.key.length === 1 && /^[a-zA-Z]$/.test(e.key)) {
+      if (wordBuffer) {
         e.preventDefault();
-        setWordBuffer(prev => prev + e.key);
+        const t = transliterateWord(wordBuffer, sourceLang);
+        
+        const start = el.selectionStart;
+        const end = el.selectionEnd;
+        const newVal = inputText.substring(0, start) + t + (e.key === ' ' ? ' ' : '\n') + inputText.substring(end);
+        setInputText(newVal);
+        setInputLatinBuffer(prev => (prev + " " + wordBuffer).trim());
+        setWordBuffer('');
+        setTimeout(() => { el.selectionStart = el.selectionEnd = start + t.length + 1; el.focus(); }, 0);
+      }
+      return; 
     }
+    if (e.key.length === 1 && /^[a-zA-Z]$/.test(e.key)) { e.preventDefault(); setWordBuffer(prev => prev + e.key); }
   };
 
-  // 🔍 Real-time Suggestion Filtering: Now strictly matches from the BEGINNING (startsWith)
-  useEffect(() => {
-    if (!suggestionsEnabled || !lessonsData) {
-      setActiveSuggestions([]);
-      return;
-    }
+  const groupedLessons = useMemo(() => {
+    if (!lessonsData) return {};
+    const lessonsToProcess = moduleStatus.isPro 
+      ? lessonsData.lessons 
+      : lessonsData.lessons.slice(0, 20);
 
-    const query = (wordBuffer || inputText).toLowerCase().trim();
-    if (!query || query.length < 1) {
-      setActiveSuggestions([]);
-      return;
-    }
-    
-    // 🎯 REFINED LOGIC: Use .startsWith() instead of .includes() for cleaner UX
-    const matches = lessonsData.lessons.filter(l => 
-      l.source_native.toLowerCase().startsWith(query) || 
-      l.source_transliteration?.toLowerCase().startsWith(query)
-    ).slice(0, 4);
-    
-    setActiveSuggestions(matches);
-  }, [inputText, wordBuffer, lessonsData, suggestionsEnabled]);
-
-  const selectSuggestion = async (s: LessonItem) => {
-    setInputText(s.source_native);
-    setWordBuffer('');
-    setResult({
-      originalText: s.source_native,
-      translatedText: s.target_native,
-      pronunciationSourceScript: s.target_in_source_script,
-      pronunciationLatin: s.target_transliteration,
-      sourceLanguage: sourceLang,
-      targetLanguage: targetLang,
-      words: []
-    });
-    setActiveSuggestions([]);
-    setError(null);
-    setSaveStatus('saved');
-
-    if (!moduleStatus.isPro) {
-      const newCount = await userService.incrementUsage(sourceLang, targetLang, s.source_native.length, 'chars');
-      setModuleStatus(prev => ({ ...prev, usageChars: newCount }));
-    }
-  };
+    return lessonsToProcess.reduce((acc: any, lesson) => {
+      const cat = lesson.note || 'Vocabulary';
+      if (!acc[cat]) acc[cat] = [];
+      acc[cat].push(lesson);
+      return acc;
+    }, {});
+  }, [lessonsData, moduleStatus.isPro]);
 
   const getLangName = (code: string) => LANGUAGES.find(l => l.code === code)?.name || code;
   const currentModuleName = `${getLangName(sourceLang)} → ${getLangName(targetLang)}`;
 
-  const isSwapDisabled = appMode !== 'global_indian';
+  const handleOpenSubscribe = () => {
+    if (userProfile?.isAuthenticated) {
+      setShowSubModal(true);
+    } else {
+      setShowAuthModal(true);
+    }
+  };
 
   if (isInitialLoading) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center">
-         <div className="bg-[#1d4683] p-5 rounded-3xl shadow-2xl shadow-indigo-500/20 animate-bounce mb-6">
-            <BookOpen className="text-white w-12 h-12" />
-         </div>
-         <h1 className="text-white text-2xl font-black mb-2 tracking-tighter uppercase">Learnages</h1>
-         <div className="flex items-center gap-2 text-indigo-300 font-bold text-sm">
-            <Loader2 className="animate-spin" size={16} /> Syncing Global Dictionary...
-         </div>
+         <div className="bg-[#1d4683] p-5 rounded-3xl animate-bounce mb-6"><BookOpen className="text-white w-12 h-12" /></div>
+         <h1 className="text-white text-2xl font-black mb-2 uppercase">Learnages</h1>
+         <div className="flex items-center gap-2 text-indigo-300 font-bold text-sm"><Loader2 className="animate-spin" size={16} /> Syncing Matrix...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} onSuccess={() => { setShowAuthModal(false); syncUser(); }} />
-      <SubscriptionModal isOpen={showSubModal} moduleName={currentModuleName} onClose={() => setShowSubModal(false)} onSubscribe={handleSubscribe} />
+    <div className={`min-h-screen bg-slate-50 flex flex-col transition-all duration-500 ${moduleStatus.isPro ? 'premium-gold' : ''}`}>
+      <AuthModal isOpen={showAuthModal} onClose={() => { setShowAuthModal(false); setIsSubscribePending(false); }} onSuccess={() => { setShowAuthModal(false); syncUser(); }} />
+      <SubscriptionModal isOpen={showSubModal} moduleName={currentModuleName} onClose={() => setShowSubModal(false)} onSubscribe={async (d, p) => { await userService.subscribeToModule(sourceLang, targetLang, d, p); syncUser(true); }} />
       <ProfileModal isOpen={showProfileModal} user={userProfile} onClose={() => setShowProfileModal(false)} onLogout={() => userService.logoutUser()} />
       <SupportModal isOpen={showSupportModal} onClose={() => setShowSupportModal(false)} />
+      
+      {selectedPhrase && <PhraseDetailModal phrase={selectedPhrase} targetLang={targetLang} onClose={() => setSelectedPhrase(null)} />}
 
-      <Navbar user={userProfile} activeTab={activeTab} onTabChange={setActiveTab} isPro={moduleStatus.isPro} onOpenAuth={() => setShowAuthModal(true)} onOpenProfile={() => setShowProfileModal(true)} onOpenSupport={() => setShowSupportModal(true)} onOpenSubscribe={triggerSubscribe} />
+      <Navbar user={userProfile} activeTab={activeTab} onTabChange={(t) => setActiveTab(t as any)} isPro={moduleStatus.isPro} onOpenAuth={() => setShowAuthModal(true)} onOpenProfile={() => setShowProfileModal(true)} onOpenSupport={() => setShowSupportModal(true)} onOpenSubscribe={handleOpenSubscribe} />
+
+      {newVersionAvailable && (
+        <div className="bg-indigo-600 text-white px-4 py-2 flex items-center justify-center gap-4 text-xs font-bold animate-in slide-in-from-top duration-300 z-50">
+          <span>New version available</span>
+          <button onClick={handleVersionRefresh} className="bg-white text-indigo-600 px-3 py-1 rounded-lg hover:bg-indigo-50 transition-colors uppercase text-[10px] font-black shadow-sm">Refresh</button>
+        </div>
+      )}
 
       <main className="flex-1 container mx-auto px-4 py-8 max-w-7xl">
-        
-        {activeTab !== 'about' && (
-          <div className="mb-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="mb-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-4">
                 <div className="bg-white p-1.5 rounded-2xl shadow-sm border border-slate-200 flex gap-1">
-                  <button onClick={() => setAppMode('indian_kannadiga')} className={`flex-1 py-3 px-2 rounded-xl text-sm font-bold transition-all ${appMode === 'indian_kannadiga' ? 'bg-[#1d4683] text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Learn Kannada</button>
-                  <button onClick={() => setAppMode('kannadiga_indian')} className={`flex-1 py-3 px-2 rounded-xl text-sm font-bold transition-all ${appMode === 'kannadiga_indian' ? 'bg-[#1d4683] text-white' : 'text-slate-600 hover:bg-slate-50'}`}>From Kannada</button>
-                  <button onClick={() => setAppMode('global_indian')} className={`flex-1 py-3 px-2 rounded-xl text-sm font-bold transition-all ${appMode === 'global_indian' ? 'bg-[#1d4683] text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Global Pairs</button>
+                  {['Learn Kannada', 'From Kannada', 'Global Pair'].map((m, i) => (
+                    <button key={m} onClick={() => setAppMode(i === 0 ? 'indian_kannadiga' : i === 1 ? 'kannadiga_indian' : 'global_indian')} className={`flex-1 py-3 px-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${((i===0&&appMode==='indian_kannadiga')||(i===1&&appMode==='kannadiga_indian')||(i===2&&appMode==='global_indian')) ? (moduleStatus.isPro ? 'accent-button shadow-md' : 'bg-[#1d4683] text-white shadow-md') : 'text-slate-600 hover:bg-slate-50'}`}>{m}</button>
+                  ))}
                 </div>
-                
-                <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col sm:flex-row items-center gap-4">
-                  <div className="flex-1 w-full">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">From Language</label>
-                      <select 
-                        value={sourceLang} 
-                        onChange={(e) => { setSourceLang(e.target.value); setWordBuffer(''); }} 
-                        disabled={appMode === 'kannadiga_indian'} 
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-800 font-bold outline-none"
-                      >
-                          {LANGUAGES.map(l => <option key={l.code} value={l.code} disabled={l.code === targetLang}>{l.name}</option>)}
-                      </select>
-                  </div>
-                  <button 
-                    onClick={() => { if(!isSwapDisabled) { const s = sourceLang; setSourceLang(targetLang); setTargetLang(s); setWordBuffer(''); }}} 
-                    disabled={isSwapDisabled}
-                    className={`p-3 rounded-full transition-all ${isSwapDisabled ? 'bg-slate-100 text-slate-300 opacity-50' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}
-                  >
-                    <ArrowRightLeft size={20}/>
-                  </button>
-                  <div className="flex-1 w-full">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">To Language</label>
-                      <select 
-                        value={targetLang} 
-                        onChange={(e) => setTargetLang(e.target.value)} 
-                        disabled={appMode === 'indian_kannadiga'} 
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-800 font-bold outline-none"
-                      >
-                          {LANGUAGES.map(l => <option key={l.code} value={l.code} disabled={l.code === sourceLang}>{l.name}</option>)}
-                      </select>
-                  </div>
+                <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex items-center gap-4">
+                  <div className="flex-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Language I know</label><select disabled={appMode === 'kannadiga_indian'} value={sourceLang} onChange={e => setSourceLang(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-800 font-bold outline-none disabled:opacity-60">{LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}</select></div>
+                  <button disabled={appMode !== 'global_indian'} onClick={() => { const s = sourceLang; setSourceLang(targetLang); setTargetLang(s); }} className="p-3 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 transition-transform active:rotate-180 disabled:opacity-30 disabled:cursor-not-allowed"><ArrowRightLeft size={20}/></button>
+                  <div className="flex-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Language I want to learn</label><select disabled={appMode === 'indian_kannadiga'} value={targetLang} onChange={e => setTargetLang(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-800 font-bold outline-none disabled:opacity-60">{LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}</select></div>
                 </div>
             </div>
-            <div className="bg-[#1d4683] p-6 rounded-3xl shadow-xl flex flex-col justify-center text-white border border-white/10 relative overflow-hidden group">
-                <div className={`absolute inset-0 bg-amber-500/10 transition-opacity duration-1000 ${isExpiringSoon ? 'opacity-100' : 'opacity-0'}`} />
-                <h3 className="text-xl font-black mb-2 flex items-center gap-2 relative z-10">
-                   <Sparkles size={18} className={isExpiringSoon ? 'text-amber-300' : 'text-blue-300'} /> {currentModuleName}
-                </h3>
-                <div className="space-y-3 relative z-10">
-                  <div className="flex justify-between text-[10px] font-black uppercase text-slate-400 tracking-tighter">
-                     <span>Access Level</span>
-                     <span className={isExpiringSoon ? 'text-amber-300 animate-pulse' : ''}>
-                        {moduleStatus.isPro ? 'Professional' : `Trial: ${moduleStatus.usageChars}/${LIMIT_CHARS} Chars`}
-                     </span>
-                  </div>
-                  <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                      <div className={`h-full transition-all duration-700 ${isExpiringSoon ? 'bg-amber-400' : 'bg-blue-400'}`} style={{ width: moduleStatus.isPro ? '100%' : `${(moduleStatus.usageChars/LIMIT_CHARS)*100}%` }} />
+            <div className={`p-6 rounded-3xl shadow-xl flex flex-col justify-center border border-white/10 relative overflow-hidden transition-all duration-700 ${moduleStatus.isPro ? 'bg-premium text-slate-900' : 'bg-[#1d4683] text-white'}`}>
+                <h3 className="text-xl font-black mb-2 flex items-center gap-2"><Sparkles size={18} /> {currentModuleName}</h3>
+                <div className="space-y-3">
+                  <div className="flex justify-between text-[10px] font-black uppercase opacity-60"><span>Status</span><span>{moduleStatus.isPro ? 'Professional Access' : `Trial: ${moduleStatus.usageChars}/${LIMIT_CHARS} chars`}</span></div>
+                  <div className="h-2 bg-black/10 rounded-full overflow-hidden">
+                    <div className={`h-full transition-all duration-1000 ${moduleStatus.isPro ? 'bg-slate-900' : 'bg-blue-400'}`} style={{ width: moduleStatus.isPro ? '100%' : `${(moduleStatus.usageChars/LIMIT_CHARS)*100}%` }} />
                   </div>
                 </div>
+                {moduleStatus.isPro && <div className="absolute -right-4 -bottom-4 opacity-10 rotate-12"><Trophy size={100}/></div>}
             </div>
-          </div>
-        )}
+        </div>
 
         {activeTab === 'translate' && (
-           <div className="space-y-10">
-             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-                <div className="space-y-4 relative">
-                    <div className={`bg-white rounded-[2.5rem] shadow-sm border overflow-hidden relative transition-all duration-300 ${smartTypingMode ? 'ring-4 ring-[#1d4683]/10 border-[#1d4683]' : 'border-slate-200'}`}>
+           <div className="space-y-16">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+                  <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col h-[400px] relative">
                       
-                      <div className="px-6 py-3 border-b flex items-center justify-between bg-white">
-                         <div className="flex items-center gap-1">
-                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mr-2">Typing Mode:</span>
-                            <div className="relative">
-                               <button 
-                                 onClick={() => setShowInputTools(!showInputTools)}
-                                 className={`flex items-center gap-2 px-3 py-1.5 border rounded-lg text-[11px] font-bold transition-all ${smartTypingMode ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'}`}
-                               >
-                                  {smartTypingMode ? <><Type size={14}/> Smart Phonetic Typing</> : <><Keyboard size={14} /> Standard</>}
-                                  <ChevronDown size={12} className={`ml-1 ${smartTypingMode ? 'text-slate-300' : 'text-slate-400'}`} />
-                               </button>
+                      {/* Smart Preview - Top Segment (Non-English Only) */}
+                      {sourceLang !== 'en' && wordBuffer && (
+                        <div className="px-8 py-3 bg-[#1d4683] text-white flex justify-between items-center shrink-0 z-20 animate-in slide-in-from-top-2">
+                           <div className="font-mono font-bold text-lg">{wordBuffer} → {transliterateWord(wordBuffer, sourceLang)}</div>
+                           <div className="text-[9px] font-black uppercase bg-white/20 px-2 py-1 rounded-lg">Space to align</div>
+                        </div>
+                      )}
 
-                               {showInputTools && (
-                                 <div className="absolute top-full left-0 z-50 mt-2 w-72 bg-white rounded-xl shadow-2xl border border-slate-200 p-1 animate-in fade-in slide-in-from-top-2">
-                                    <button 
-                                      onClick={() => { setSmartTypingMode(true); setWordBuffer(''); setShowInputTools(false); }}
-                                      className={`w-full flex items-center justify-between px-4 py-4 rounded-lg text-left text-xs font-medium hover:bg-slate-50 ${smartTypingMode ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700'}`}
-                                    >
-                                       <div className="flex items-center gap-3">
-                                          <Type size={20} />
-                                          <div>
-                                             <p className="font-bold">Smart Phonetic Typing</p>
-                                             <p className="text-[9px] opacity-70">Phonetic conversion (namaskara → ನಮಸ್ಕಾರ)</p>
-                                          </div>
-                                       </div>
-                                       {smartTypingMode && <Check size={16} />}
-                                    </button>
-                                    <button 
-                                      onClick={() => { setSmartTypingMode(false); setWordBuffer(''); setShowInputTools(false); }}
-                                      className={`w-full flex items-center justify-between px-4 py-4 rounded-lg text-left text-xs font-medium hover:bg-slate-50 ${!smartTypingMode ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700'}`}
-                                    >
-                                       <div className="flex items-center gap-3">
-                                          <Keyboard size={20} />
-                                          <div>
-                                             <p className="font-bold">Standard</p>
-                                             <p className="text-[9px] opacity-70">Use your own device keyboard</p>
-                                          </div>
-                                       </div>
-                                       {!smartTypingMode && <Check size={16} />}
-                                    </button>
-                                 </div>
-                               )}
+                      <div className="flex-1 p-8 overflow-y-auto bg-transparent">
+                        <textarea 
+                          ref={textareaRef} 
+                          value={inputText} 
+                          onChange={e => setInputText(e.target.value)} 
+                          onKeyDown={handleInputKeyDown} 
+                          placeholder="Type sounds phonetically (e.g. namaste)..." 
+                          className="w-full h-full focus:outline-none resize-none text-2xl font-bold placeholder:text-slate-300 dark:placeholder:text-slate-500 text-slate-900 dark:text-white bg-transparent" 
+                        />
+                      </div>
+                      
+                      {/* Suggestions Bar - Positioned BELOW Input Field */}
+                      {currentSuggestions.length > 0 && (
+                        <div className="px-8 py-2 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 overflow-x-auto whitespace-nowrap flex gap-2 scrollbar-hide shrink-0 z-10 transition-all">
+                          {currentSuggestions.map((s, idx) => (
+                            <button 
+                              key={idx} 
+                              onClick={() => {
+                                insertTextAtCursor(s.source_native, s.source_transliteration);
+                              }}
+                              className="px-4 py-1.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-black text-[#1d4683] dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-slate-600 transition-all active:scale-95 flex-shrink-0"
+                            >
+                              {s.source_native}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Control Bar - Bottom Segment (Always Visible) */}
+                      <div className="px-8 py-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex justify-between items-center shrink-0 z-20">
+                          <div className="flex items-center gap-2">
+                             <div title="Listen to input text via TTS" className="flex items-center">
+                                <AudioPlayer text={inputText} langCode={sourceLang} size="sm" />
+                             </div>
+                             <div className="flex items-center gap-1.5 px-2 border-l border-slate-200 dark:border-slate-700">
+                                <button 
+                                  onClick={() => setSmartTypingMode(!smartTypingMode)} 
+                                  className={`p-2 rounded-xl transition-colors ${smartTypingMode ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-400' : 'bg-white dark:bg-slate-800 border dark:border-slate-700 text-slate-400'}`} 
+                                  title={smartTypingMode ? "Mode A: Selected Pair (Phonetic Transliteration)" : "Mode B: Inbuilt Keyboard (Direct System Input)"}
+                                >
+                                  <Keyboard size={18}/>
+                                </button>
+                                <div className="px-3 py-2 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-xl text-[10px] font-black uppercase flex items-center gap-1 cursor-default">
+                                  <Sparkle size={12}/> Suggestions ON
+                                </div>
+                             </div>
+                          </div>
+                          <button 
+                            onClick={() => handleTranslate()} 
+                            disabled={isTranslating} 
+                            title="Transliterate via Universal Linguistic Matrix"
+                            className={`px-10 py-3 rounded-full font-black text-xs uppercase flex items-center gap-2 shadow-xl active:scale-95 transition-all ${moduleStatus.isPro ? 'accent-button' : 'bg-[#1d4683] text-white'}`}
+                          >
+                            {isTranslating ? <Loader2 className="animate-spin" size={14}/> : <Zap size={14}/>} Transliterate
+                          </button>
+                      </div>
+                  </div>
+
+                  <div className="min-h-[400px] flex flex-col justify-center">
+                      {result && !isTranslating ? (
+                         <div className="bg-white rounded-[2.5rem] shadow-xl border border-slate-200 p-10 space-y-8 animate-in fade-in slide-in-from-right-8 duration-500">
+                            <div className="flex justify-between items-start">
+                               <div className="flex-1">
+                                  <span className="text-[10px] font-black px-3 py-1 rounded-full uppercase mb-3 inline-block bg-green-50 text-green-600 border border-green-100">Linguistic Matrix Match</span>
+                                  <p className="text-4xl text-slate-900 font-black leading-tight tracking-tight">{result.originalText}</p>
+                               </div>
+                               <div className="flex flex-col gap-2">
+                                  <button onClick={() => setVerified(true)} className={`p-4 rounded-2xl border transition-all ${verified ? 'bg-green-500 text-white border-green-500 shadow-lg' : 'bg-slate-50 text-slate-400 border-slate-100 hover:bg-indigo-50 hover:text-indigo-600'}`} title="Verify Transliteration: Help build the global collective dictionary">
+                                    {verified ? <CheckCircle2 size={24}/> : <ThumbsUp size={24}/>}
+                                  </button>
+                                  <button title="Share this transliteration" className="p-4 bg-slate-50 text-slate-400 rounded-2xl border border-slate-100 hover:bg-slate-100 transition-colors"><Share2 size={20}/></button>
+                               </div>
+                            </div>
+                            <div className={`p-10 rounded-[2.5rem] shadow-2xl relative overflow-hidden transition-all duration-700 ${moduleStatus.isPro ? 'bg-premium text-slate-900' : 'bg-[#1d4683] text-white'}`}>
+                               <p className="text-5xl font-indic font-black mb-6 leading-tight drop-shadow-sm">{result.pronunciationSourceScript}</p>
+                               <div className="flex items-center gap-4">
+                                  <AudioPlayer text={result.translatedText} langCode={targetLang} />
+                                  <span className="text-xs uppercase font-black opacity-60 tracking-[0.2em]">{result.translatedText}</span>
+                               </div>
+                               {moduleStatus.isPro && <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 -rotate-45 translate-x-12 -translate-y-12 animate-shimmer" />}
                             </div>
                          </div>
-                         <div className="flex flex-col items-end">
-                            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter">Laptop recommended</span>
+                      ) : (
+                         <div className="text-center p-12 bg-white/50 rounded-[3rem] border-2 border-dashed border-slate-200">
+                            <MousePointer2 className="mx-auto mb-4 text-slate-200" size={48} />
+                            <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Waiting for sound input...</p>
                          </div>
-                      </div>
+                      )}
+                  </div>
+              </div>
 
-                      <textarea 
-                        ref={textareaRef}
-                        value={inputText + (wordBuffer ? currentTransliteration : '')} 
-                        onChange={(e) => { if (!smartTypingMode) setInputText(e.target.value); }} 
-                        onKeyDown={handleInputKeyDown}
-                        placeholder={smartTypingMode ? `Start typing sounds...` : `Type ${getLangName(sourceLang)} here...`} 
-                        className={`w-full h-64 p-8 focus:outline-none resize-none text-2xl font-bold placeholder:text-slate-200 ${smartTypingMode ? 'text-indigo-900 bg-indigo-50/5' : 'text-slate-900'}`} 
-                      />
-                      
-                      <div className="px-8 py-4 border-t bg-slate-50/50 flex justify-between items-center">
-                         <AudioPlayer text={inputText} langCode={sourceLang} size="sm" />
-                         <button onClick={() => handleTranslate()} disabled={isTranslating} className="bg-[#1d4683] text-white px-8 py-2.5 rounded-full font-black text-xs uppercase flex items-center gap-2 hover:bg-black transition-all shadow-md active:scale-95">
-                            {isTranslating ? <Loader2 className="animate-spin" size={14} /> : <ArrowRight size={14} />} Transliterate
-                         </button>
-                      </div>
+              {/* --- KNOWLEDGE LIBRARY --- */}
+              <div className="space-y-12">
+                <div className="flex items-center gap-3 px-4">
+                   <Library className="text-[#1d4683]" size={28} />
+                   <h2 className="text-3xl font-black text-slate-800 uppercase tracking-tighter">Knowledge Library</h2>
+                </div>
+
+                {Object.keys(groupedLessons).length > 0 ? Object.entries(groupedLessons).map(([category, items]: any) => (
+                  <div key={category} className="space-y-6">
+                    <div className="flex items-center gap-4 px-4">
+                        <div className="h-px flex-1 bg-slate-200" />
+                        <span className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 whitespace-nowrap">{category}</span>
+                        <div className="h-px flex-1 bg-slate-200" />
                     </div>
-
-                    {/* COMMUNITY SUGGESTIONS TOGGLE */}
-                    <div className="bg-white p-6 rounded-[2.5rem] border-2 border-[#1d4683]/10 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-6">
-                       <div className="flex items-center gap-4">
-                          <div className={`p-4 rounded-2xl shadow-inner ${suggestionsEnabled ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
-                             <Sparkle size={28} className={suggestionsEnabled ? "animate-pulse" : ""} />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                      {items.map((lesson: any, idx: number) => (
+                        <div key={idx} onClick={() => setSelectedPhrase(lesson)} className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm hover:shadow-xl hover:scale-[1.02] transition-all cursor-pointer group relative overflow-hidden">
+                          <div className="flex justify-between items-start mb-4">
+                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 group-hover:text-indigo-600 transition-colors">Core Asset</span>
+                            {lesson.is_custom && <div className="bg-green-100 text-green-700 p-1.5 rounded-lg" title="Community Verified Discovery"><Check size={12} strokeWidth={4} /></div>}
                           </div>
-                          <div className="text-center sm:text-left">
-                             <h4 className="font-black text-slate-900 text-lg uppercase tracking-tighter leading-none mb-1">Self-Learning Dictionary</h4>
-                             <p className="text-xs text-slate-500 font-bold max-w-xs">AI results are automatically shared with the community for instant 0ms retrieval.</p>
+                          <p className="text-xl font-black text-slate-800 mb-1 leading-tight">{lesson.source_native}</p>
+                          <p className="text-xs text-slate-400 font-bold mb-4 italic truncate">"{lesson.meaning_english}"</p>
+                          <div className={`p-4 rounded-2xl transition-all duration-500 ${moduleStatus.isPro ? 'bg-premium text-slate-900' : 'bg-slate-50 text-[#1d4683]'}`}>
+                             <p className="text-2xl font-indic font-black truncate">{lesson.target_in_source_script}</p>
                           </div>
-                       </div>
-                       <button 
-                            onClick={() => setSuggestionsEnabled(!suggestionsEnabled)}
-                            className={`relative inline-flex h-10 w-20 items-center rounded-full transition-all focus:outline-none ring-4 ${suggestionsEnabled ? 'bg-indigo-600 ring-indigo-100' : 'bg-slate-300 ring-slate-50'}`}
-                        >
-                            <span className={`inline-block h-8 w-8 transform rounded-full bg-white shadow-xl transition-transform ${suggestionsEnabled ? 'translate-x-11' : 'translate-x-1'}`} />
-                       </button>
-                    </div>
-
-                    {/* Suggestion Overlay: Strict Prefix Match (StartsWith) */}
-                    {activeSuggestions.length > 0 && (
-                        <div className="absolute top-[320px] left-0 right-0 z-30 mt-2 p-2 bg-white rounded-3xl shadow-2xl border border-slate-200 space-y-1 animate-in slide-in-from-top-2">
-                           <div className="flex items-center justify-between px-4 py-2 border-b border-slate-50 mb-2">
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Knowledge Match</p>
-                                <button onClick={() => setActiveSuggestions([])} className="text-slate-300 hover:text-slate-500"><X size={14}/></button>
-                           </div>
-                           {activeSuggestions.map((s, idx) => (
-                             <button key={idx} onClick={() => selectSuggestion(s)} className="w-full text-left p-4 hover:bg-indigo-50 rounded-2xl flex items-center justify-between transition-colors group">
-                                <div>
-                                    <div className="flex items-center gap-2">
-                                        <p className="font-bold text-slate-800">{s.source_native}</p>
-                                        {s.is_custom && <span className="bg-amber-100 text-amber-700 text-[8px] font-black uppercase px-1.5 rounded">Learned</span>}
-                                    </div>
-                                    <p className="text-[11px] text-slate-400 font-medium">{s.target_native}</p>
-                                </div>
-                                <span className="bg-indigo-100 text-indigo-600 px-3 py-1 rounded-full text-[9px] font-black uppercase flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><Zap size={8} fill="currentColor"/> Instant Output</span>
-                             </button>
-                           ))}
                         </div>
-                    )}
-                </div>
-
-                <div className="space-y-6 min-h-[300px]">
-                    {!result && !isTranslating && !error && (
-                       <div className="h-full flex flex-col items-center justify-center text-center p-12 bg-white/50 rounded-[2.5rem] border-2 border-dashed border-slate-200">
-                          <MousePointer2 size={48} className="text-slate-200 mb-4" />
-                          <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest leading-loose">Enter text to start</p>
-                       </div>
-                    )}
-
-                    {isTranslating && (
-                       <div className="h-full flex flex-col items-center justify-center space-y-4 p-12 bg-white rounded-[2.5rem] border border-slate-200 shadow-sm animate-pulse">
-                          <Zap size={48} className="text-[#1d4683] animate-bounce" />
-                          <p className="text-[#1d4683] font-black uppercase text-xs tracking-widest font-mono">Learning & Translating...</p>
-                       </div>
-                    )}
-
-                    {result && !isTranslating && (
-                       <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 p-10 space-y-8 animate-in fade-in slide-in-from-right-4">
-                          <div className="flex justify-between items-start">
-                             <div className="flex-1">
-                                <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full uppercase mb-2 inline-block">Translation</span>
-                                <p className="text-4xl text-slate-900 font-black leading-tight tracking-tight">{result.translatedText}</p>
-                             </div>
-                             {saveStatus === 'saved' && (
-                                <div className="bg-green-50 text-green-600 p-3 rounded-2xl border border-green-100 flex items-center gap-2">
-                                   <CheckCircle size={18} />
-                                   <span className="text-[10px] font-black uppercase">Auto-Saved to DB</span>
-                                </div>
-                             )}
-                          </div>
-                          
-                          <div className="bg-[#1d4683] p-8 rounded-[2.5rem] text-white shadow-xl shadow-indigo-100/50">
-                             <span className="text-[10px] font-black bg-white/20 px-3 py-1 rounded-full uppercase mb-4 inline-block tracking-widest">Pronunciation</span>
-                             <p className="text-3xl font-black mb-6 tracking-tight leading-tight">{result.pronunciationSourceScript}</p>
-                             <div className="flex items-center gap-4">
-                                <AudioPlayer text={result.translatedText} langCode={targetLang} />
-                                <span className="text-[10px] uppercase font-black text-indigo-200 tracking-widest">Listen to Result</span>
-                             </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-slate-50">
-                            {result.words.map((w, i) => <Flashcard key={i} word={w} targetLang={targetLang} />)}
-                          </div>
-                       </div>
-                    )}
-                </div>
-             </div>
-             
-             {/* Global Deck Database */}
-             <div className="border-t pt-16">
-                <div className="flex justify-between items-end mb-8 px-4">
-                    <div>
-                        <h3 className="text-3xl font-black text-slate-900 flex items-center gap-3"><BookOpen className="text-[#1d4683]" /> Knowledge Deck</h3>
-                        <p className="text-sm text-slate-500 font-bold uppercase tracking-tight">Core + Community Shared Phrases for {currentModuleName}</p>
+                      ))}
                     </div>
-                    <button onClick={() => loadLessons()} className="p-3 bg-white border border-slate-100 rounded-2xl shadow-sm text-slate-400 hover:text-[#1d4683] transition-all"><RefreshCw size={18}/></button>
-                </div>
-                
-                {isLoadingLessons ? (
-                  <div className="flex justify-center py-20"><Loader2 className="animate-spin text-slate-200" size={50}/></div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 px-2">
-                     {lessonsData?.lessons.map((l, i) => {
-                        const isLocked = !moduleStatus.isPro && i >= LIMIT_STUDY;
-                        return (
-                          <div key={i} className={`bg-white border-2 rounded-[2.5rem] p-8 relative transition-all group ${isLocked ? 'overflow-hidden border-slate-100 opacity-60' : 'hover:shadow-2xl border-white hover:border-[#1d4683]/10 shadow-lg'}`}>
-                             <div className="flex justify-between font-black text-[10px] text-slate-400 mb-6 uppercase tracking-widest border-b border-slate-50 pb-3">
-                                <span className="flex items-center gap-1 group-hover:text-indigo-600 transition-colors">
-                                    {l.source_native} {l.is_custom && <span className="bg-amber-100 text-amber-700 px-1.5 rounded text-[8px]">Learned</span>}
-                                </span>
-                                <span className="bg-slate-100 px-2 py-0.5 rounded text-[8px]">CONCEPT {i + 1}</span>
-                             </div>
-                             <p className="text-2xl font-black text-[#1d4683] mb-1 leading-tight">{l.target_in_source_script}</p>
-                             <p className="text-slate-800 font-bold text-lg mb-6">{l.target_native}</p>
-                             <div className="flex items-center gap-4 mt-auto pt-6 border-t border-slate-50">
-                                <AudioPlayer text={l.target_native} langCode={targetLang} size="md" />
-                                <span className="text-[10px] font-black text-slate-400 uppercase flex-1">{l.note}</span>
-                             </div>
-                             
-                             {isLocked && (
-                               <div className="absolute inset-0 bg-slate-50/90 backdrop-blur-[2px] flex flex-col items-center justify-center rounded-[2.5rem] z-20 p-8 text-center">
-                                  <div className="bg-white p-4 rounded-3xl mb-4 shadow-xl border border-amber-50 text-amber-500">
-                                      <Lock size={32}/>
-                                  </div>
-                                  <p className="text-[14px] font-black text-slate-900 uppercase mb-5 tracking-tighter leading-tight">Pro Required</p>
-                                  <button onClick={triggerSubscribe} className="bg-[#1d4683] text-white px-8 py-3 rounded-full text-xs font-black uppercase hover:bg-black shadow-xl transition-all">Unlock</button>
-                               </div>
-                             )}
-                          </div>
-                        );
-                     })}
+                  </div>
+                )) : (
+                  <div className="text-center py-20 bg-white rounded-[3rem] border-2 border-dashed border-slate-200">
+                      <Loader2 className="animate-spin mx-auto text-slate-300 mb-4" size={40} />
+                      <p className="text-slate-400 font-black uppercase text-sm tracking-widest">Building Library sections...</p>
                   </div>
                 )}
-             </div>
+                
+                {!moduleStatus.isPro && (
+                  <div onClick={handleOpenSubscribe} className="bg-slate-900 p-12 rounded-[3rem] border border-slate-800 flex flex-col items-center justify-center text-center space-y-6 shadow-2xl group cursor-pointer relative overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-transparent" />
+                    <Lock size={40} className="text-amber-400 mb-2 relative z-10" />
+                    <h3 className="text-2xl font-black text-white relative z-10">Expand Your Knowledge</h3>
+                    <p className="text-slate-400 font-bold max-w-md relative z-10">Unlock 100+ Professional categories including Travel, Doctor, and Market Conversations.</p>
+                    <button className="bg-amber-400 text-amber-950 font-black px-8 py-3 rounded-full uppercase text-xs relative z-10 shadow-lg">Upgrade Now</button>
+                  </div>
+                )}
+              </div>
            </div>
         )}
 
-        {activeTab === 'chat' && <div className="max-w-4xl mx-auto"><ChatInterface sourceLang={sourceLang} targetLang={targetLang} sourceLangName={getLangName(sourceLang)} targetLangName={getLangName(targetLang)} onLimitReached={triggerSubscribe} /></div>}
-        {activeTab === 'quiz' && <div className="max-w-3xl mx-auto"><QuizInterface sourceLang={sourceLang} targetLang={targetLang} sourceLangName={getLangName(sourceLang)} targetLangName={getLangName(targetLang)} onLimitReached={triggerSubscribe} /></div>}
+        {activeTab === 'chat' && <div className="max-w-4xl mx-auto"><ChatInterface sourceLang={sourceLang} targetLang={targetLang} sourceLangName={getLangName(sourceLang)} targetLangName={getLangName(targetLang)} onLimitReached={() => handleOpenSubscribe()} /></div>}
+        {activeTab === 'quiz' && <div className="max-w-3xl mx-auto"><QuizInterface sourceLang={sourceLang} targetLang={targetLang} sourceLangName={getLangName(sourceLang)} targetLangName={getLangName(targetLang)} onLimitReached={() => handleOpenSubscribe()} /></div>}
         {activeTab === 'about' && <AboutSection />}
       </main>
     </div>

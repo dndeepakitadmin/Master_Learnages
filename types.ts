@@ -1,9 +1,22 @@
+
 export interface WordPair {
   original: string;
   translated: string;
   pronunciationSourceScript?: string; 
-  // Added pronunciationLatin to WordPair to resolve property existence errors
   pronunciationLatin?: string;
+}
+
+// Added missing MasterPhrase interface
+export interface MasterPhrase {
+  id: number;
+  category: string;
+  en_meaning: string;
+  langs: Record<string, {
+    native: string;
+    latin: string;
+    phonetic_mode: string;
+    b?: Record<string, string>;
+  }>;
 }
 
 export interface TranslationResult {
@@ -14,6 +27,26 @@ export interface TranslationResult {
   sourceLanguage: string;
   targetLanguage: string;
   words: WordPair[];
+  category?: string;
+  en_anchor?: string; // The English concept identifier
+  matrix?: Record<string, MatrixLangData>; // Full 20-lang matrix
+  /**
+   * Indicates if the translation result was found in the global matrix or local cache.
+   */
+  is_matrix?: boolean;
+}
+
+export interface MatrixLangData {
+  n: string; // Native Script
+  l: string; // Latin Transliteration
+}
+
+export interface MatrixEntry {
+  id?: string;
+  en_anchor: string;
+  category: string;
+  matrix_data: Record<string, MatrixLangData>;
+  created_at?: string;
 }
 
 export interface LanguageOption {
@@ -51,7 +84,6 @@ export interface LessonItem {
   target_in_source_script: string;
   meaning_english: string;
   note: string;
-  // Added is_custom to LessonItem to resolve property existence errors in App.tsx
   is_custom?: boolean;
 }
 
@@ -64,20 +96,6 @@ export interface LessonResponse {
   subscription_tier: string;
   transliteration_mode: string;
   lessons: LessonItem[];
-}
-
-export interface LangEntry {
-  native: string;
-  latin: string;
-  phonetic_mode: "native" | "fallback_en";
-  b?: Record<string, string>;
-}
-
-export interface MasterPhrase {
-  id: number;
-  category: string;
-  en_meaning: string;
-  langs: Record<string, LangEntry>;
 }
 
 export interface UserProfile {

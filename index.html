@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -12,7 +13,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     
     <!-- Payment SDKs -->
-    <script src="https://checkout.razorpay.com/v1/checkout.js" async></script>
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
     <script src="https://pay.google.com/gp/p/js/pay.js" async></script>
     
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -20,22 +21,60 @@
       body {
         font-family: 'Inter', sans-serif;
         -webkit-tap-highlight-color: transparent;
-      }
-      
-      .no-copy {
         -webkit-user-select: none;
         -moz-user-select: none;
         -ms-user-select: none;
         user-select: none;
       }
+      
+      .security-blur {
+        filter: blur(20px) grayscale(1);
+        pointer-events: none;
+        transition: filter 0.3s ease;
+      }
+
+      .font-indic {
+        line-height: 1.6 !important;
+        letter-spacing: 0.02em;
+        word-spacing: 0.1em;
+      }
+
+      @keyframes shimmer {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(100%); }
+      }
+      .animate-shimmer {
+        animation: shimmer 2.5s infinite linear;
+      }
+
+      /* 🏆 PREMIUM GOLD THEME */
+      .premium-gold .bg-premium {
+        background: linear-gradient(135deg, #bf953f, #fcf6ba, #b38728, #fbf5b7, #aa771c);
+        color: #1a1a1a;
+      }
+      .premium-gold .text-premium {
+        background: linear-gradient(to right, #bf953f, #aa771c);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+      .premium-gold .border-premium {
+        border-color: #bf953f;
+      }
+      .premium-gold .accent-button {
+        background: linear-gradient(135deg, #bf953f, #aa771c);
+        color: white;
+      }
+
+      /* 📊 PROGRESS RING */
+      .progress-ring__circle {
+        transition: stroke-dashoffset 0.35s;
+        transform: rotate(-90deg);
+        transform-origin: 50% 50%;
+      }
 
       @media print {
-        @page { margin: 2cm; }
-        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: white; }
-        .no-print { display: none !important; }
-        .print-only { display: block !important; }
-        #root { padding: 0; }
-        header { display: none; }
+        body { display: none !important; }
+        #root { display: none !important; }
       }
     </style>
 <script type="importmap">
@@ -45,13 +84,13 @@
     "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
     "react/": "https://aistudiocdn.com/react@^19.2.0/",
     "react": "https://aistudiocdn.com/react@^19.2.0",
-    "@supabase/supabase-js": "https://aistudiocdn.com/@supabase/supabase-js@^2.85.0",
+    "@supabase/supabase-js": "https://aistudiocdn.com/@supabase/supabase-js@^2.48.0",
     "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0"
   }
 }
 </script>
 </head>
-  <body class="bg-slate-50 text-slate-900 antialiased selection:bg-indigo-100 selection:text-indigo-700">
+  <body class="bg-slate-50 text-slate-900 antialiased selection:bg-none">
     <div id="root"></div>
     <script type="module" src="./index.tsx"></script>
   </body>

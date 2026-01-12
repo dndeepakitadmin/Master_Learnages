@@ -1,6 +1,6 @@
-
 import { LessonItem, MasterPhrase } from '../types';
 import { userService } from '../services/userService';
+import { transliterateWord } from '../services/transliterationService';
 import { MASTER_DICTIONARY } from './masterDictionary'; // Universal fallback
 import { MASTER_DICTIONARY_KN } from './masterDictionary.kn';
 import { MASTER_DICTIONARY_HI } from './masterDictionary.hi';
@@ -49,19 +49,14 @@ export const DICTIONARY_REGISTRY: Record<string, MasterPhrase[]> = {
   ar: MASTER_DICTIONARY_AR,
 };
 
-// In-memory cache for merged results
 const mergedCache: Record<string, MasterPhrase[]> = {};
 
-/**
- * 🔄 FETCH & MERGE DICTIONARY (STATIC ONLY)
- */
 export const getMergedDictionary = async (langCode: string): Promise<MasterPhrase[]> => {
   if (mergedCache[langCode]) return mergedCache[langCode];
 
   const staticData = DICTIONARY_REGISTRY[langCode] || [];
   const merged = [...staticData];
 
-  // Fill gaps from Universal Fallback
   MASTER_DICTIONARY.forEach(univ => {
     if (!merged.find(m => m.id === univ.id)) {
       merged.push(univ);
@@ -74,7 +69,7 @@ export const getMergedDictionary = async (langCode: string): Promise<MasterPhras
 };
 
 /**
- * 🎓 GENERATE LESSON ITEMS (STATIC + DB)
+ * 🎓 GENERATE LESSON ITEMS (STATIC + DB + MATRIX)
  */
 export const generateStaticLessons = async (
   sourceCode: string,
@@ -83,7 +78,7 @@ export const generateStaticLessons = async (
   const targetDict = await getMergedDictionary(targetCode);
   const sourceDict = await getMergedDictionary(sourceCode);
 
-  // 1. Generate core lessons from static dictionary
+  // 1. Core Static Lessons
   const coreLessons = targetDict.map((targetPhrase) => {
     const targetData = targetPhrase.langs[targetCode];
     let sourcePhrase = sourceDict.find(p => p.id === targetPhrase.id);
@@ -95,16 +90,24 @@ export const generateStaticLessons = async (
       source_transliteration: sourceData?.latin || "",
       target_native: targetData?.native || targetPhrase.en_meaning,
       target_transliteration: targetData?.latin || "",
-      target_in_source_script: targetData?.b?.[sourceCode] || targetData?.latin || "", 
+      target_in_source_script: targetData?.b?.[sourceCode] || transliterateWord(targetData?.latin || '', sourceCode), 
       meaning_english: targetPhrase.en_meaning,
       note: targetPhrase.category,
       is_custom: false
     };
   });
 
-  // 2. Fetch custom lessons from Supabase table 'user_lessons'
+  // 2. Custom User Lessons (Legacy Pair Logic)
   const customLessons = await userService.getUserLessons(sourceCode, targetCode);
 
-  // Return static first, then DB
-  return [...coreLessons, ...customLessons];
+  // 3. Shared Global Matrix Entries (New Crowdsourcing Logic)
+  const matrixLessons = await userService.getRecentMatrixEntries(sourceCode, targetCode);
+  
+  // Enhance matrix lessons with local script bridge
+  const enhancedMatrix = matrixLessons.map(l => ({
+    ...l,
+    target_in_source_script: transliterateWord(l.target_transliteration, sourceCode)
+  }));
+
+  return [...coreLessons, ...customLessons, ...enhancedMatrix];
 };

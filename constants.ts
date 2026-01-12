@@ -28,11 +28,19 @@ export const LANGUAGES: LanguageOption[] = [
 export const DEFAULT_SOURCE_LANG = 'hi';
 export const DEFAULT_TARGET_LANG = 'kn';
 
+// 🖼️ BRANDING
+export const APP_NAME = "Learnages";
+// Using absolute path for Firebase Hosting reliability
+export const APP_LOGO = "/Logo.png"; 
+
+// 🚀 VERSIONING
+export const APP_VERSION = "1.0.2";
+
 // Freemium Limits
-export const LIMIT_CHARS = 200;   // Characters for API Transliteration
-export const LIMIT_CHATS = 10;    // Messages in Conversation tab
-export const LIMIT_QUIZZES = 10;  // Completed quizzes
-export const LIMIT_STUDY = 10;    // Free sentences in Study tab
+export const LIMIT_CHARS = 200;   // Reduced to 200 as requested
+export const LIMIT_CHATS = 20;    // Increased for better testing
+export const LIMIT_QUIZZES = 20;  
+export const LIMIT_STUDY = 30;    
 
 // Subscription Plans
 export const SUBSCRIPTION_PLANS = [
@@ -40,13 +48,13 @@ export const SUBSCRIPTION_PLANS = [
   { id: 'monthly', name: 'Monthly Pro', price: 10, days: 30, description: '30 days access', bestValue: true }
 ];
 
-export const PRICE_INR = 10; // Default price (Legacy reference)
-export const SUBSCRIPTION_DAYS = 30; // Default days (Legacy reference)
+export const PRICE_INR = 10; 
+export const SUBSCRIPTION_DAYS = 30; 
 
 // ------------------------------------------------------------------
 // 💳 PAYMENT CONSTANTS
 // ------------------------------------------------------------------
-export const RAZORPAY_KEY_ID = 'rzp_live_RjDeS5Gq6U8xCp'; // Replace with your live key for production
+export const RAZORPAY_KEY_ID = 'rzp_live_RjDeS5Gq6U8xCp'; 
 
 // ------------------------------------------------------------------
 // 📞 SUPPORT CONTACT DETAILS

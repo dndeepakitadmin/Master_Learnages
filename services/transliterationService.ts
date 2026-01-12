@@ -43,27 +43,32 @@ const REGISTRY: Record<string, TransliterationMap> = {
 
 /**
  * ⌨️ UNIVERSAL PHONETIC WORD CONVERTER
- * Processes a full English string into Native Script
+ * Processes a full English string into Native Script.
+ * Fixed: Preserves double consonants like 'nn', 'tt' which are valid sounds.
  */
 export const transliterateWord = (engWord: string, langCode: string): string => {
   const map = REGISTRY[langCode];
   if (!map || !engWord) return engWord;
-  if (!map.consonants || Object.keys(map.consonants).length === 0) return engWord;
 
   let result = "";
   let i = 0;
   let activeConsonant = false;
 
-  while (i < engWord.length) {
-    let matched = false;
-    // Check for 3-char clusters, then 2, then 1
-    for (let len = 3; len >= 1; len--) {
-      const sub = engWord.substring(i, i + len).toLowerCase();
-      const isVowel = "aeiou".includes(sub[0]);
+  // We only clean TRIPLE repetitions which are almost certainly typos (e.g. "aaare" -> "aare")
+  const cleanedWord = engWord.replace(/([a-zA-Z])\1{2,}/gi, '$1$1'); 
 
-      // Vowel following consonant (Matra)
-      if (isVowel && activeConsonant && map.halant) {
-        const matra = map.matras[sub];
+  while (i < cleanedWord.length) {
+    let matched = false;
+    
+    // Try matching longest possible prefix (max 3 chars)
+    for (let len = 3; len >= 1; len--) {
+      if (i + len > cleanedWord.length) continue;
+      
+      const sub = cleanedWord.substring(i, i + len);
+      
+      // 1. Try Matra match (Vowel following consonant)
+      if (activeConsonant && map.halant) {
+        const matra = map.matras[sub] || map.matras[sub.toLowerCase()];
         if (matra !== undefined) {
           result = result.slice(0, -map.halant.length) + matra;
           i += len;
@@ -73,7 +78,7 @@ export const transliterateWord = (engWord: string, langCode: string): string => 
         }
       }
 
-      // Independent Vowel or Consonant
+      // 2. Try Exact Match (Preserves Case for N/L/T/D)
       const vowelForm = map.vowels[sub];
       const consForm = map.consonants[sub];
 
@@ -92,10 +97,21 @@ export const transliterateWord = (engWord: string, langCode: string): string => 
         activeConsonant = !!map.halant;
         break;
       }
+
+      // 3. Fallback to lowercase for Vowels/Matras only
+      const lowerSub = sub.toLowerCase();
+      const lowerVowel = map.vowels[lowerSub];
+      if (lowerVowel) {
+         result += lowerVowel;
+         i += len;
+         matched = true;
+         activeConsonant = false;
+         break;
+      }
     }
 
     if (!matched) {
-      result += engWord[i];
+      result += cleanedWord[i];
       i++;
       activeConsonant = false;
     }
@@ -104,5 +120,5 @@ export const transliterateWord = (engWord: string, langCode: string): string => 
   return result;
 };
 
-export const resetEngine = () => {}; // No-op in buffered mode
+export const resetEngine = () => {};
 export const isTransliterationSupported = (langCode: string): boolean => !!REGISTRY[langCode];
