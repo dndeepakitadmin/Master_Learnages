@@ -6,7 +6,6 @@ export interface WordPair {
   pronunciationLatin?: string;
 }
 
-// Added missing MasterPhrase interface
 export interface MasterPhrase {
   id: number;
   category: string;
@@ -28,17 +27,14 @@ export interface TranslationResult {
   targetLanguage: string;
   words: WordPair[];
   category?: string;
-  en_anchor?: string; // The English concept identifier
-  matrix?: Record<string, MatrixLangData>; // Full 20-lang matrix
-  /**
-   * Indicates if the translation result was found in the global matrix or local cache.
-   */
+  en_anchor?: string; 
+  matrix?: Record<string, MatrixLangData>; 
   is_matrix?: boolean;
 }
 
 export interface MatrixLangData {
-  n: string; // Native Script
-  l: string; // Latin Transliteration
+  n: string; 
+  l: string; 
 }
 
 export interface MatrixEntry {
@@ -98,11 +94,14 @@ export interface LessonResponse {
   lessons: LessonItem[];
 }
 
+export type UserRole = 'global_admin' | 'admin' | 'support_agent' | 'user';
+
 export interface UserProfile {
   id?: string;
   name: string;
   email: string;
   phone: string;
+  role: UserRole;
   isAuthenticated: boolean;
   subscriptions: Record<string, number>;
   usage: Record<string, number>;
@@ -110,10 +109,13 @@ export interface UserProfile {
 
 export interface SupportTicket {
   id: string;
+  ticket_no: string;
   user_id: string;
   category: string;
   message: string;
+  status: 'open' | 'resolved';
   created_at?: string;
+  user_email?: string;
 }
 
 export interface PaymentHistoryItem {

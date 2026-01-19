@@ -1,22 +1,32 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import {
   X, Headphones, MessageSquare, Mail, FileText, Send,
-  CheckCircle, Loader2, ExternalLink, ArrowRight
+  CheckCircle, Loader2, ExternalLink, ArrowRight, AlertCircle, LogIn
 } from 'lucide-react';
 import { SUPPORT_EMAIL, SUPPORT_WHATSAPP } from '../constants';
 import { userService } from '../services/userService';
+import { UserProfile } from '../types';
 
 interface SupportModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenAuth: () => void;
 }
 
-export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose }) => {
-  const [view, setView] = useState<'menu' | 'form' | 'success'>('menu');
+export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onOpenAuth }) => {
+  const [view, setView] = useState<'menu' | 'form' | 'success' | 'login_prompt'>('menu');
   const [category, setCategory] = useState('General Inquiry');
   const [message, setMessage] = useState('');
   const [ticketId, setTicketId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [user, setUser] = useState<UserProfile | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      userService.getCurrentUser().then(setUser);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -25,13 +35,22 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose }) =
     setIsLoading(true);
 
     try {
-      const id = await userService.createSupportTicket(category, message);
-      setTicketId(id); // UUID returned by Supabase
+      const srNumber = await userService.createSupportTicket(category, message);
+      setTicketId(srNumber); 
       setView('success');
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      console.error("Support Ticket Submission Error:", e?.message || JSON.stringify(e));
+      alert("Failed to submit ticket. Please check your connection.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleRaiseClick = () => {
+    if (!user?.isAuthenticated) {
+      setView('login_prompt');
+    } else {
+      setView('form');
     }
   };
 
@@ -116,7 +135,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose }) =
               </div>
 
               <button
-                onClick={() => setView('form')}
+                onClick={handleRaiseClick}
                 className="w-full flex items-center gap-4 p-4 bg-slate-50 border border-slate-200 rounded-xl hover:bg-slate-100 transition-colors group text-left"
               >
                 <div className="bg-slate-500 p-2 rounded-full text-white group-hover:scale-110 transition-transform">
@@ -128,6 +147,27 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose }) =
                 </div>
                 <ArrowRight size={16} className="text-slate-400" />
               </button>
+            </div>
+          )}
+
+          {/* LOGIN PROMPT VIEW */}
+          {view === 'login_prompt' && (
+            <div className="text-center py-6 space-y-6 animate-in fade-in zoom-in-95 duration-300">
+               <div className="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto text-amber-500">
+                  <AlertCircle size={32} />
+               </div>
+               <div className="space-y-2">
+                  <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">Identity Required</h3>
+                  <p className="text-sm text-slate-500 font-medium px-2">To raise a trackable ticket, we need to link it to your account so we can notify you about resolutions.</p>
+               </div>
+               <div className="space-y-3 pt-2">
+                  <button onClick={onOpenAuth} className="w-full py-4 bg-[#1d4683] text-white rounded-xl font-black uppercase text-xs flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all">
+                     <LogIn size={16}/> Sign In to Continue
+                  </button>
+                  <button onClick={() => setView('menu')} className="w-full py-3 text-slate-400 font-bold uppercase text-[10px] hover:text-slate-600 transition-colors">
+                     Back to Menu
+                  </button>
+               </div>
             </div>
           )}
 

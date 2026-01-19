@@ -1,24 +1,25 @@
+
 import {
   UserProfile,
   PaymentHistoryItem,
   SupportTicket,
   LessonItem,
   MatrixEntry,
-  MatrixLangData
+  MatrixLangData,
+  UserRole
 } from '../types';
 
 import {
   SUBSCRIPTION_DAYS,
   LIMIT_CHARS,
   LIMIT_CHATS,
-  LIMIT_QUIZZES
+  LIMIT_QUIZZES,
+  GLOBAL_ADMIN_EMAILS
 } from '../constants';
 
 import {
   supabase,
-  forceLogoutStorageClear,
-  SUPABASE_ANON_KEY,
-  SUPABASE_URL
+  forceLogoutStorageClear
 } from '../lib/supabaseClient';
 
 export const getModuleKey = (
@@ -42,12 +43,47 @@ export const userService = {
 
   async getEmailByPhone(phoneInput: string, countryCode: string = '+91'): Promise<string | null> {
     const cleanInput = phoneInput.replace(/\D/g, '');
-    if (cleanInput.length < 10) return null;
+    if (cleanInput.length < 10) {
+      console.warn("Lookup Aborted: Phone input too short", cleanInput);
+      return null;
+    }
     const last10 = cleanInput.slice(-10);
+
     try {
-      const { data } = await supabase.from('profiles').select('email').ilike('phone', `%${last10}`).maybeSingle();
-      return data?.email || null;
-    } catch { return null; }
+      console.log("Database Lookup Initiated for suffix:", last10);
+      
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('email, phone')
+        .ilike('phone', `%${last10}`)
+        .maybeSingle();
+
+      if (error) {
+        console.error("Database Query Error Details:", {
+          message: error.message,
+          details: error.details,
+          code: error.code
+        });
+        
+        if (error.message?.includes('Failed to fetch')) {
+          throw new Error("Failed to fetch: Check your internet connection or verify if the Supabase project is active.");
+        }
+        return null;
+      }
+
+      if (!data) {
+        console.warn("Database Lookup Result: No user matches the provided phone suffix.");
+        return null;
+      }
+
+      console.log("Database Lookup Success: Found linked email", data.email);
+      return data?.email?.trim().toLowerCase() || null;
+    } catch (err: any) {
+      console.error("Critical Exception during database lookup:", err);
+      // Re-throw descriptive network errors to be handled by extractErrorString
+      if (err.message?.includes('Failed to fetch')) throw err;
+      return null;
+    }
   },
 
   async checkPhoneExists(phoneInput: string, countryCode: string = '+91'): Promise<boolean> {
@@ -55,7 +91,11 @@ export const userService = {
     if (cleanInput.length < 10) return false;
     const last10 = cleanInput.slice(-10);
     try {
-        const { data } = await supabase.from('profiles').select('id').ilike('phone', `%${last10}`).maybeSingle();
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id')
+          .ilike('phone', `%${last10}`)
+          .maybeSingle();
         return !!data;
     } catch { return false; }
   },
@@ -63,9 +103,10 @@ export const userService = {
   /* ---------------- AUTH / PROFILE ---------------- */
 
   async createProfile(id: string, email: string, phone: string, name: string) {
+    const role: UserRole = GLOBAL_ADMIN_EMAILS.includes(email.toLowerCase()) ? 'global_admin' : 'user';
     const { error } = await supabase
       .from('profiles')
-      .upsert({ id, email, phone: phone || null, name }, { onConflict: 'id' });
+      .upsert({ id, email: email.toLowerCase(), phone: phone || null, name, role }, { onConflict: 'id' });
     if (error) throw error;
   },
 
@@ -93,6 +134,7 @@ export const userService = {
           name: 'Learner',
           email: '',
           phone: '',
+          role: 'user',
           isAuthenticated: false,
           subscriptions: {},
           usage: {}
@@ -102,8 +144,7 @@ export const userService = {
       const userId = session.user.id;
       const userEmail = session.user.email || '';
 
-      // 🔄 SYNC CHECK: Ensure profile exists in DB
-      let { data: profile, error: profileErr } = await supabase
+      let { data: profile } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
@@ -112,11 +153,17 @@ export const userService = {
       if (!profile) {
         const meta = session.user.user_metadata;
         const capturedName = meta?.full_name || meta?.name || 'Learner';
-        // Auto-create profile for Google/Social users
         await this.createProfile(userId, userEmail, '', capturedName);
-        // Re-fetch to be sure
         const { data: newProfile } = await supabase.from('profiles').select('*').eq('id', userId).single();
         profile = newProfile;
+      }
+
+      let role: UserRole = profile?.role || 'user';
+      if (GLOBAL_ADMIN_EMAILS.includes(userEmail.toLowerCase())) {
+        role = 'global_admin';
+        if (profile?.role !== 'global_admin') {
+          await supabase.from('profiles').update({ role: 'global_admin' }).eq('id', userId);
+        }
       }
 
       const [usageRes, subRes] = await Promise.all([
@@ -129,6 +176,7 @@ export const userService = {
         email: userEmail,
         name: profile?.name || 'Learner',
         phone: profile?.phone || '',
+        role: role,
         isAuthenticated: true,
         usage: {},
         subscriptions: {}
@@ -149,10 +197,10 @@ export const userService = {
       localStorage.setItem('learnages_user', JSON.stringify(user));
       return user;
 
-    } catch (e) {
-      console.warn("User sync failed", e);
+    } catch (e: any) {
+      console.warn("User sync failed", e?.message || JSON.stringify(e));
       const cached = localStorage.getItem('learnages_user');
-      return cached ? JSON.parse(cached) : { name: 'Learner', email: '', phone: '', isAuthenticated: false, subscriptions: {}, usage: {} };
+      return cached ? JSON.parse(cached) : { name: 'Learner', email: '', phone: '', role: 'user', isAuthenticated: false, subscriptions: {}, usage: {} };
     }
   },
 
@@ -179,7 +227,7 @@ export const userService = {
       const { data: existing } = await supabase.from('global_matrix').select('matrix_data').eq('en_anchor', anchor).maybeSingle();
       const merged = existing ? { ...existing.matrix_data, ...entry.matrix_data } : entry.matrix_data;
       await supabase.from('global_matrix').upsert({ en_anchor: anchor, category: entry.category || 'General', matrix_data: merged }, { onConflict: 'en_anchor' });
-    } catch (e) { console.warn("Matrix sync failure", e); }
+    } catch (e: any) { console.warn("Matrix sync failure", e?.message || JSON.stringify(e)); }
   },
 
   async searchGlobalMatrix(searchText: string, langCode: string): Promise<MatrixEntry | null> {
@@ -243,13 +291,7 @@ export const userService = {
     return user.usage[key];
   },
 
-  /**
-   * 🛠️ ROBUST ACTIVATION ENGINE
-   * Solves "Activation Failed" by ensuring fresh user session via getUser()
-   * and using a safer UPSERT implementation for the subscription table.
-   */
   async subscribeToModule(source: string, target: string, days: number = SUBSCRIPTION_DAYS, paymentId?: string) {
-    // 🛡️ CRITICAL: Use getUser() to verify the token with the server and get fresh metadata
     const { data: { user }, error: userErr } = await supabase.auth.getUser();
     if (userErr || !user) throw new Error("Authentication failed. Please sign in again.");
 
@@ -259,7 +301,6 @@ export const userService = {
     
     const moduleKey = `${source}-${target}`;
     
-    // Perform robust upsert to handle both first-time buyers and renewals
     const { error } = await supabase.from('subscriptions').upsert({ 
       user_id: userId, 
       module: moduleKey, 
@@ -268,11 +309,10 @@ export const userService = {
     }, { onConflict: 'user_id,module' });
 
     if (error) {
-        console.error("Database Activation Error:", error);
+        console.error("Database Activation Error:", error.message || JSON.stringify(error));
         throw new Error(`Sync Error: ${error.message || 'Database rejected activation'}`);
     }
 
-    // Refresh Local Storage
     localStorage.removeItem('learnages_user');
     return await this.getCurrentUser();
   },
@@ -296,45 +336,61 @@ export const userService = {
   async getPaymentHistory(): Promise<PaymentHistoryItem[]> {
     const user = await this.getCurrentUser();
     if (!user.id) return [];
-    const { data } = await supabase.from('subscriptions').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
+    const { data, error } = await supabase.from('subscriptions').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
+    if (error) {
+       console.error("Payment history fetch failed:", error.message || JSON.stringify(error));
+       return [];
+    }
     return (data || []).map((i: any) => ({ id: i.id || String(Math.random()), user_id: i.user_id, module: i.module, expiry: i.expiry, created_at: i.created_at }));
   },
 
   async getTicketHistory(): Promise<SupportTicket[]> {
     const user = await this.getCurrentUser();
     if (!user.id) return [];
-    const { data } = await supabase.from('support_tickets').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
+    const { data, error } = await supabase.from('support_tickets').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
+    if (error) {
+       console.error("Ticket history fetch failed:", error.message || JSON.stringify(error));
+       return [];
+    }
     return data || [];
   },
 
-  /**
-   * 🛡️ SECURE PASSWORD CHANGE
-   * Verifies current credentials before allowing an update.
-   */
+  async createSupportTicket(category: string, message: string): Promise<string> {
+    const user = await this.getCurrentUser();
+    if (!user.isAuthenticated) throw new Error("Authentication required to raise a ticket.");
+    
+    const { count, error: countErr } = await supabase.from('support_tickets').select('*', { count: 'exact', head: true });
+    const ticketNo = 'SR-' + (10001 + (count || 0));
+
+    const { data, error } = await supabase.from('support_tickets').insert({ 
+      category, 
+      message, 
+      user_id: user.id || null,
+      ticket_no: ticketNo,
+      status: 'open'
+    }).select('ticket_no').single();
+    
+    if (error) {
+       console.error("Create Ticket Error:", error.message || JSON.stringify(error));
+       throw error;
+    }
+    return data?.ticket_no || ticketNo;
+  },
+
   async changePassword(currentPass: string, newPass: string) {
     const { data: { user } } = await supabase.auth.getUser();
     const email = user?.email;
     if (!email) throw new Error("No active session found.");
 
-    // 1. Validate current password via a re-auth check
     const { error: verifyError } = await supabase.auth.signInWithPassword({
       email: email,
       password: currentPass,
     });
 
-    if (verifyError) {
-      throw new Error("Present password is incorrect.");
-    }
+    if (verifyError) throw new Error("Present password is incorrect.");
 
-    // 2. Apply new password
     const { error } = await supabase.auth.updateUser({ password: newPass });
     if (error) throw error;
-  },
-
-  async createSupportTicket(category: string, message: string): Promise<string> {
-    const user = await this.getCurrentUser();
-    const { data } = await supabase.from('support_tickets').insert({ category, message, user_id: user.id || null }).select('id').single();
-    return data?.id || 'TKT-' + Math.random().toString(36).substr(2, 9).toUpperCase();
   },
 
   async logoutUser() {

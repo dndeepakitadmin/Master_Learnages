@@ -1,3 +1,4 @@
+
 import { LanguageOption } from './types';
 
 export const LANGUAGES: LanguageOption[] = [
@@ -30,15 +31,14 @@ export const DEFAULT_TARGET_LANG = 'kn';
 
 // 🖼️ BRANDING
 export const APP_NAME = "Learnages";
-// Using absolute path for Firebase Hosting reliability
 export const APP_LOGO = "/Logo.png"; 
 
 // 🚀 VERSIONING
 export const APP_VERSION = "1.0.2";
 
 // Freemium Limits
-export const LIMIT_CHARS = 200;   // Reduced to 200 as requested
-export const LIMIT_CHATS = 20;    // Increased for better testing
+export const LIMIT_CHARS = 200;   
+export const LIMIT_CHATS = 20;    
 export const LIMIT_QUIZZES = 20;  
 export const LIMIT_STUDY = 30;    
 
@@ -57,7 +57,13 @@ export const SUBSCRIPTION_DAYS = 30;
 export const RAZORPAY_KEY_ID = 'rzp_live_RjDeS5Gq6U8xCp'; 
 
 // ------------------------------------------------------------------
-// 📞 SUPPORT CONTACT DETAILS
+// 🛡️ ADMINISTRATIVE ACCESS
 // ------------------------------------------------------------------
+export const GLOBAL_ADMIN_EMAILS = [
+  'learnagess@gmail.com',
+  'dndeepakit@gmail.com'
+];
+
+// 📞 SUPPORT CONTACT DETAILS
 export const SUPPORT_WHATSAPP = '919035887175';
 export const SUPPORT_EMAIL = 'dndeepakit@gmail.com';

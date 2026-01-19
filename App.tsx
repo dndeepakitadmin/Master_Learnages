@@ -1,5 +1,6 @@
+
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { LANGUAGES, DEFAULT_SOURCE_LANG, DEFAULT_TARGET_LANG, LIMIT_STUDY, LIMIT_CHARS, LIMIT_CHATS, LIMIT_QUIZZES, APP_VERSION } from './constants';
+import { LANGUAGES, DEFAULT_SOURCE_LANG, DEFAULT_TARGET_LANG, LIMIT_STUDY, LIMIT_CHARS, LIMIT_CHATS, LIMIT_QUIZZES, APP_VERSION, SUPPORT_WHATSAPP } from './constants';
 import { TranslationResult, UserProfile, LessonResponse, LessonItem, MatrixEntry, MatrixLangData } from './types';
 import { translateText, generateLessons } from './services/geminiService';
 import { cacheService } from './services/cacheService';
@@ -15,17 +16,19 @@ import { ProfileModal } from './components/ProfileModal';
 import { SupportModal } from './components/SupportModal';
 import { PhraseDetailModal } from './components/PhraseDetailModal';
 import { Navbar } from './components/Navbar';
+import { AdminDashboard } from './components/AdminDashboard';
 import { MASTER_DICTIONARY } from './data/masterDictionary';
+// Add FileText icon to the list of imports from lucide-react
 import {
   ArrowRightLeft, Loader2, Lock, Check,
   BookOpen, Sparkles, Zap, ArrowRight, MousePointer2,
   RefreshCw, Keyboard, Type, ChevronDown, ThumbsUp,
   Info, Sparkle, Laptop, X, Save, CheckCircle, Database, AlertCircle, Key, Globe2,
   CloudLightning, Globe, Users, CheckCircle2, Share2, Wrench, FolderOpen, LayoutGrid, Library, ChevronDownCircle,
-  Trophy
+  Trophy, HelpCircle, Headphones, MessageCircle, FileText
 } from 'lucide-react';
 
-type Tab = 'translate' | 'chat' | 'quiz' | 'about';
+type Tab = 'translate' | 'chat' | 'quiz' | 'about' | 'library';
 type AppMode = 'indian_kannadiga' | 'kannadiga_indian' | 'global_indian';
 
 const App: React.FC = () => {
@@ -37,7 +40,7 @@ const App: React.FC = () => {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [moduleStatus, setModuleStatus] = useState({ 
     isPro: false, usageChars: 0, limitChars: LIMIT_CHARS, 
-    isAuthenticated: false, expiry: 0
+    isAuthenticated: false, expiry: 0, usageChats: 0, limitChats: LIMIT_CHATS, usageQuizzes: 0, limitQuizzes: LIMIT_QUIZZES
   });
 
   const [isInitialLoading, setIsInitialLoading] = useState(true);
@@ -45,6 +48,7 @@ const App: React.FC = () => {
   const [showSubModal, setShowSubModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
+  const [showAdminDashboard, setShowAdminDashboard] = useState(false);
   
   const [isSubscribePending, setIsSubscribePending] = useState(false);
   const [selectedPhrase, setSelectedPhrase] = useState<LessonItem | null>(null);
@@ -60,7 +64,7 @@ const App: React.FC = () => {
   const [isLoadingLessons, setIsLoadingLessons] = useState(false);
 
   const [smartTypingMode, setSmartTypingMode] = useState(true); 
-  const [showInputTools, setShowInputTools] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(true);
   const [wordBuffer, setWordBuffer] = useState('');
   const [verified, setVerified] = useState(false);
 
@@ -68,6 +72,10 @@ const App: React.FC = () => {
   const [newVersionAvailable, setNewVersionAvailable] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const getLangName = useCallback((code: string) => {
+    return LANGUAGES.find(l => l.code === code)?.name || code;
+  }, []);
 
   const syncUser = useCallback(async (skipHeavySeeding = false) => {
     try {
@@ -101,7 +109,7 @@ const App: React.FC = () => {
         setLessonsData(data);
       } catch (e) { console.error("Lesson error:", e); }
       finally { setIsLoadingLessons(false); }
-  }, [sourceLang, targetLang, moduleStatus.isPro]);
+  }, [sourceLang, targetLang, moduleStatus.isPro, getLangName]);
 
   useEffect(() => {
     if (!isInitialLoading) loadLessons();
@@ -131,26 +139,27 @@ const App: React.FC = () => {
       setSourceLang('kn');
       if (targetLang === 'kn') setTargetLang('hi');
     }
-  }, [appMode]);
+  }, [appMode, sourceLang, targetLang]);
 
-  // Suggestions Logic: Mandatory 3-character trigger & Strict prefix matching from char 0
+  // Suggestions Logic
   useEffect(() => {
-    // UNIFIED COMPARISON REPRESENTATION: Use Native script as the base for all languages
+    if (!showSuggestions) {
+      setCurrentSuggestions([]);
+      return;
+    }
+
     const totalInputNative = sourceLang === 'en' 
       ? inputText 
       : inputText + transliterateWord(wordBuffer, sourceLang);
 
-    // Trigger Rule: Suggestions MUST NOT appear before 3 characters. MUST appear at 3rd character.
     if (totalInputNative.length < 3) {
       setCurrentSuggestions([]);
       return;
     }
 
-    // Normalization for robust character-by-character prefix matching (ignoring punctuation)
     const normalizeForMatch = (s: string) => s.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()!?]/g, "").trim();
     const prefix = normalizeForMatch(totalInputNative);
 
-    // Source 1: Dictionary suggestions (Filtered letter-wise from character 0)
     const dictionaryMatches = MASTER_DICTIONARY.filter(ph => {
       const ld = ph.langs[sourceLang];
       if (!ld || !ld.native) return false;
@@ -166,19 +175,17 @@ const App: React.FC = () => {
       note: ph.category
     }));
 
-    // Source 2: Database suggestions (Filtered letter-wise from character 0)
     const lessonMatches = (lessonsData?.lessons || []).filter(l => {
       const sentence = normalizeForMatch(l.source_native);
       return sentence.startsWith(prefix);
     });
 
-    // Merge + dedupe results from both sources simultaneously
     const combined = [...lessonMatches, ...dictionaryMatches]
       .filter((v, i, a) => a.findIndex(t => t.source_native === v.source_native) === i)
       .slice(0, 15);
 
     setCurrentSuggestions(combined as LessonItem[]);
-  }, [inputText, wordBuffer, sourceLang, targetLang, lessonsData]);
+  }, [inputText, wordBuffer, sourceLang, targetLang, lessonsData, showSuggestions]);
 
   const handleTranslate = useCallback(async (forcedText?: string, bypassCache: boolean = false) => {
     let textToUse = (forcedText || inputText).trim();
@@ -223,21 +230,11 @@ const App: React.FC = () => {
   const insertTextAtCursor = (textToInsert: string, rawPhonetic: string) => {
     const el = textareaRef.current;
     if (!el) return;
-    
-    // Selecting a sentence suggestion replaces the typed prefix with the complete verified phrase
     setInputText(textToInsert);
     setWordBuffer('');
-    
-    if (sourceLang !== 'en') {
-      setInputLatinBuffer(rawPhonetic);
-    } else {
-      setInputLatinBuffer('');
-    }
-
-    setTimeout(() => {
-      el.focus();
-      el.selectionStart = el.selectionEnd = textToInsert.length;
-    }, 0);
+    if (sourceLang !== 'en') setInputLatinBuffer(rawPhonetic);
+    else setInputLatinBuffer('');
+    setTimeout(() => { el.focus(); el.selectionStart = el.selectionEnd = textToInsert.length; }, 0);
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -249,7 +246,6 @@ const App: React.FC = () => {
       if (wordBuffer) {
         e.preventDefault();
         const t = transliterateWord(wordBuffer, sourceLang);
-        
         const start = el.selectionStart;
         const end = el.selectionEnd;
         const newVal = inputText.substring(0, start) + t + (e.key === ' ' ? ' ' : '\n') + inputText.substring(end);
@@ -277,15 +273,11 @@ const App: React.FC = () => {
     }, {});
   }, [lessonsData, moduleStatus.isPro]);
 
-  const getLangName = (code: string) => LANGUAGES.find(l => l.code === code)?.name || code;
   const currentModuleName = `${getLangName(sourceLang)} → ${getLangName(targetLang)}`;
 
   const handleOpenSubscribe = () => {
-    if (userProfile?.isAuthenticated) {
-      setShowSubModal(true);
-    } else {
-      setShowAuthModal(true);
-    }
+    if (userProfile?.isAuthenticated) setShowSubModal(true);
+    else setShowAuthModal(true);
   };
 
   if (isInitialLoading) {
@@ -302,12 +294,37 @@ const App: React.FC = () => {
     <div className={`min-h-screen bg-slate-50 flex flex-col transition-all duration-500 ${moduleStatus.isPro ? 'premium-gold' : ''}`}>
       <AuthModal isOpen={showAuthModal} onClose={() => { setShowAuthModal(false); setIsSubscribePending(false); }} onSuccess={() => { setShowAuthModal(false); syncUser(); }} />
       <SubscriptionModal isOpen={showSubModal} moduleName={currentModuleName} onClose={() => setShowSubModal(false)} onSubscribe={async (d, p) => { await userService.subscribeToModule(sourceLang, targetLang, d, p); syncUser(true); }} />
-      <ProfileModal isOpen={showProfileModal} user={userProfile} onClose={() => setShowProfileModal(false)} onLogout={() => userService.logoutUser()} />
-      <SupportModal isOpen={showSupportModal} onClose={() => setShowSupportModal(false)} />
+      {/* Updated ProfileModal: added onOpenAuth prop */}
+      <ProfileModal 
+        isOpen={showProfileModal} 
+        user={userProfile} 
+        onClose={() => setShowProfileModal(false)} 
+        onLogout={() => userService.logoutUser()} 
+        onOpenAuth={() => { setShowProfileModal(false); setShowAuthModal(true); }}
+      />
+      <SupportModal 
+        isOpen={showSupportModal} 
+        onClose={() => setShowSupportModal(false)} 
+        onOpenAuth={() => { setShowSupportModal(false); setShowAuthModal(true); }}
+      />
       
+      {showAdminDashboard && userProfile && (
+        <AdminDashboard currentUserRole={userProfile.role} onBack={() => setShowAdminDashboard(false)} />
+      )}
+
       {selectedPhrase && <PhraseDetailModal phrase={selectedPhrase} targetLang={targetLang} onClose={() => setSelectedPhrase(null)} />}
 
-      <Navbar user={userProfile} activeTab={activeTab} onTabChange={(t) => setActiveTab(t as any)} isPro={moduleStatus.isPro} onOpenAuth={() => setShowAuthModal(true)} onOpenProfile={() => setShowProfileModal(true)} onOpenSupport={() => setShowSupportModal(true)} onOpenSubscribe={handleOpenSubscribe} />
+      <Navbar user={userProfile} activeTab={activeTab as any} onTabChange={(t) => setActiveTab(t as any)} isPro={moduleStatus.isPro} onOpenAuth={() => setShowAuthModal(true)} onOpenProfile={() => setShowProfileModal(true)} onOpenSupport={() => setShowSupportModal(true)} onOpenSubscribe={handleOpenSubscribe} onOpenAdmin={() => setShowAdminDashboard(true)} />
+
+      {/* Main Support Access on Home */}
+      <button 
+        onClick={() => setShowSupportModal(true)}
+        className="fixed bottom-6 right-6 z-[55] p-4 bg-[#1d4683] text-white rounded-full shadow-2xl hover:bg-black hover:scale-110 active:scale-95 transition-all group flex items-center gap-2"
+        title="Support Center"
+      >
+        <Headphones size={24} />
+        <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 whitespace-nowrap font-black text-[10px] uppercase">Contact Support</span>
+      </button>
 
       {newVersionAvailable && (
         <div className="bg-indigo-600 text-white px-4 py-2 flex items-center justify-center gap-4 text-xs font-bold animate-in slide-in-from-top duration-300 z-50">
@@ -345,9 +362,14 @@ const App: React.FC = () => {
         {activeTab === 'translate' && (
            <div className="space-y-16">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-                  <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col h-[400px] relative">
-                      
-                      {/* Smart Preview - Top Segment (Non-English Only) */}
+                  <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col h-[480px] relative">
+                      <div className="px-8 py-3 bg-slate-50 dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700 flex items-center gap-3 shrink-0">
+                         <HelpCircle size={16} className="text-[#1d4683] shrink-0" />
+                         <p className="text-[10px] font-bold text-slate-500 leading-tight">
+                            <b>Laptop Mode:</b> Phonetic typing (e.g. "namaste"). <b>Mobile Mode:</b> Turn OFF Smart Typing to use your phone's native keyboard language.
+                         </p>
+                      </div>
+
                       {sourceLang !== 'en' && wordBuffer && (
                         <div className="px-8 py-3 bg-[#1d4683] text-white flex justify-between items-center shrink-0 z-20 animate-in slide-in-from-top-2">
                            <div className="font-mono font-bold text-lg">{wordBuffer} → {transliterateWord(wordBuffer, sourceLang)}</div>
@@ -361,20 +383,17 @@ const App: React.FC = () => {
                           value={inputText} 
                           onChange={e => setInputText(e.target.value)} 
                           onKeyDown={handleInputKeyDown} 
-                          placeholder="Type sounds phonetically (e.g. namaste)..." 
+                          placeholder={smartTypingMode ? "Type sounds (e.g. namaste)..." : "Use your system keyboard..."} 
                           className="w-full h-full focus:outline-none resize-none text-2xl font-bold placeholder:text-slate-300 dark:placeholder:text-slate-500 text-slate-900 dark:text-white bg-transparent" 
                         />
                       </div>
                       
-                      {/* Suggestions Bar - Positioned BELOW Input Field */}
-                      {currentSuggestions.length > 0 && (
+                      {showSuggestions && currentSuggestions.length > 0 && (
                         <div className="px-8 py-2 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 overflow-x-auto whitespace-nowrap flex gap-2 scrollbar-hide shrink-0 z-10 transition-all">
                           {currentSuggestions.map((s, idx) => (
                             <button 
                               key={idx} 
-                              onClick={() => {
-                                insertTextAtCursor(s.source_native, s.source_transliteration);
-                              }}
+                              onClick={() => insertTextAtCursor(s.source_native, s.source_transliteration)}
                               className="px-4 py-1.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-black text-[#1d4683] dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-slate-600 transition-all active:scale-95 flex-shrink-0"
                             >
                               {s.source_native}
@@ -383,30 +402,28 @@ const App: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Control Bar - Bottom Segment (Always Visible) */}
-                      <div className="px-8 py-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex justify-between items-center shrink-0 z-20">
-                          <div className="flex items-center gap-2">
-                             <div title="Listen to input text via TTS" className="flex items-center">
-                                <AudioPlayer text={inputText} langCode={sourceLang} size="sm" />
-                             </div>
+                      <div className="px-8 py-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex flex-wrap gap-4 justify-between items-center shrink-0 z-20">
+                          <div className="flex items-center gap-3">
+                             <AudioPlayer text={inputText} langCode={sourceLang} size="sm" />
                              <div className="flex items-center gap-1.5 px-2 border-l border-slate-200 dark:border-slate-700">
                                 <button 
                                   onClick={() => setSmartTypingMode(!smartTypingMode)} 
-                                  className={`p-2 rounded-xl transition-colors ${smartTypingMode ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-400' : 'bg-white dark:bg-slate-800 border dark:border-slate-700 text-slate-400'}`} 
-                                  title={smartTypingMode ? "Mode A: Selected Pair (Phonetic Transliteration)" : "Mode B: Inbuilt Keyboard (Direct System Input)"}
+                                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all font-black text-[10px] uppercase border shadow-sm ${smartTypingMode ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white dark:bg-slate-800 text-slate-400 border-slate-200'}`}
                                 >
-                                  <Keyboard size={18}/>
+                                  <Keyboard size={14}/> {smartTypingMode ? "Phonetic ON" : "Phonetic OFF"}
                                 </button>
-                                <div className="px-3 py-2 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-xl text-[10px] font-black uppercase flex items-center gap-1 cursor-default">
-                                  <Sparkle size={12}/> Suggestions ON
-                                </div>
+                                <button 
+                                  onClick={() => setShowSuggestions(!showSuggestions)}
+                                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all font-black text-[10px] uppercase border shadow-sm ${showSuggestions ? 'bg-green-600 text-white border-green-700' : 'bg-white dark:bg-slate-800 text-slate-400 border-slate-200'}`}
+                                >
+                                  <Sparkle size={14}/> {showSuggestions ? "Suggestions ON" : "Suggestions OFF"}
+                                </button>
                              </div>
                           </div>
                           <button 
                             onClick={() => handleTranslate()} 
                             disabled={isTranslating} 
-                            title="Transliterate via Universal Linguistic Matrix"
-                            className={`px-10 py-3 rounded-full font-black text-xs uppercase flex items-center gap-2 shadow-xl active:scale-95 transition-all ${moduleStatus.isPro ? 'accent-button' : 'bg-[#1d4683] text-white'}`}
+                            className={`px-8 py-3 rounded-full font-black text-xs uppercase flex items-center gap-2 shadow-xl active:scale-95 transition-all ${moduleStatus.isPro ? 'accent-button' : 'bg-[#1d4683] text-white'}`}
                           >
                             {isTranslating ? <Loader2 className="animate-spin" size={14}/> : <Zap size={14}/>} Transliterate
                           </button>
@@ -422,10 +439,10 @@ const App: React.FC = () => {
                                   <p className="text-4xl text-slate-900 font-black leading-tight tracking-tight">{result.originalText}</p>
                                </div>
                                <div className="flex flex-col gap-2">
-                                  <button onClick={() => setVerified(true)} className={`p-4 rounded-2xl border transition-all ${verified ? 'bg-green-500 text-white border-green-500 shadow-lg' : 'bg-slate-50 text-slate-400 border-slate-100 hover:bg-indigo-50 hover:text-indigo-600'}`} title="Verify Transliteration: Help build the global collective dictionary">
+                                  <button onClick={() => setVerified(true)} className={`p-4 rounded-2xl border transition-all ${verified ? 'bg-green-500 text-white border-green-500 shadow-lg' : 'bg-slate-50 text-slate-400 border-slate-100 hover:bg-indigo-50 hover:text-indigo-600'}`}>
                                     {verified ? <CheckCircle2 size={24}/> : <ThumbsUp size={24}/>}
                                   </button>
-                                  <button title="Share this transliteration" className="p-4 bg-slate-50 text-slate-400 rounded-2xl border border-slate-100 hover:bg-slate-100 transition-colors"><Share2 size={20}/></button>
+                                  <button className="p-4 bg-slate-50 text-slate-400 rounded-2xl border border-slate-100 hover:bg-slate-100 transition-colors"><Share2 size={20}/></button>
                                </div>
                             </div>
                             <div className={`p-10 rounded-[2.5rem] shadow-2xl relative overflow-hidden transition-all duration-700 ${moduleStatus.isPro ? 'bg-premium text-slate-900' : 'bg-[#1d4683] text-white'}`}>
@@ -434,7 +451,6 @@ const App: React.FC = () => {
                                   <AudioPlayer text={result.translatedText} langCode={targetLang} />
                                   <span className="text-xs uppercase font-black opacity-60 tracking-[0.2em]">{result.translatedText}</span>
                                </div>
-                               {moduleStatus.isPro && <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 -rotate-45 translate-x-12 -translate-y-12 animate-shimmer" />}
                             </div>
                          </div>
                       ) : (
@@ -446,8 +462,39 @@ const App: React.FC = () => {
                   </div>
               </div>
 
-              {/* --- KNOWLEDGE LIBRARY --- */}
-              <div className="space-y-12">
+              {/* Home Page Support & Quick Help section */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-10 border-t border-slate-100">
+                 <div className="bg-[#1d4683] text-white p-8 rounded-[2.5rem] shadow-xl flex flex-col justify-between">
+                    <div>
+                       <h3 className="text-2xl font-black mb-2 uppercase tracking-tighter">Need Technical Help?</h3>
+                       <p className="text-blue-100 text-sm font-bold opacity-80">Our support team is available via WhatsApp or our integrated ticket system.</p>
+                    </div>
+                    <div className="mt-8 flex gap-3">
+                       <a href={`https://wa.me/${SUPPORT_WHATSAPP}`} target="_blank" rel="noreferrer" className="flex-1 bg-green-500 hover:bg-green-600 text-white p-4 rounded-2xl flex items-center justify-center gap-2 font-black text-xs uppercase transition-all shadow-md">
+                          <MessageCircle size={18}/> WhatsApp
+                       </a>
+                       <button onClick={() => setShowSupportModal(true)} className="flex-1 bg-white/10 hover:bg-white/20 text-white p-4 rounded-2xl flex items-center justify-center gap-2 font-black text-xs uppercase transition-all border border-white/10">
+                          <FileText size={18}/> Raise Ticket
+                       </button>
+                    </div>
+                 </div>
+                 <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col justify-between">
+                    <div>
+                       <h3 className="text-2xl font-black mb-2 text-[#1d4683] uppercase tracking-tighter">Matrix Verified</h3>
+                       <p className="text-slate-500 text-sm font-bold">Linguistic Matrix connects 20+ languages using a universal concept bridge.</p>
+                    </div>
+                    <div className="mt-8 flex items-center gap-4">
+                       <div className="flex -space-x-3">
+                          {LANGUAGES.slice(0, 5).map(l => (
+                             <div key={l.code} className="w-10 h-10 rounded-full border-2 border-white bg-slate-100 flex items-center justify-center text-[10px] font-black text-slate-400 uppercase">{l.code}</div>
+                          ))}
+                       </div>
+                       <span className="text-xs font-black text-slate-400 uppercase">+15 More</span>
+                    </div>
+                 </div>
+              </div>
+
+              <div className="space-y-12 pt-10">
                 <div className="flex items-center gap-3 px-4">
                    <Library className="text-[#1d4683]" size={28} />
                    <h2 className="text-3xl font-black text-slate-800 uppercase tracking-tighter">Knowledge Library</h2>
@@ -465,7 +512,7 @@ const App: React.FC = () => {
                         <div key={idx} onClick={() => setSelectedPhrase(lesson)} className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm hover:shadow-xl hover:scale-[1.02] transition-all cursor-pointer group relative overflow-hidden">
                           <div className="flex justify-between items-start mb-4">
                             <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 group-hover:text-indigo-600 transition-colors">Core Asset</span>
-                            {lesson.is_custom && <div className="bg-green-100 text-green-700 p-1.5 rounded-lg" title="Community Verified Discovery"><Check size={12} strokeWidth={4} /></div>}
+                            {lesson.is_custom && <div className="bg-green-100 text-green-700 p-1.5 rounded-lg"><Check size={12} strokeWidth={4} /></div>}
                           </div>
                           <p className="text-xl font-black text-slate-800 mb-1 leading-tight">{lesson.source_native}</p>
                           <p className="text-xs text-slate-400 font-bold mb-4 italic truncate">"{lesson.meaning_english}"</p>

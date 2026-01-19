@@ -1,39 +1,43 @@
-// Added missing React import to fix namespace error
+
 import React, { useEffect, useState } from 'react';
 import {
   LogOut, X, Phone, Mail, Receipt, Loader2,
   MessageSquare, CreditCard, UserCircle, KeyRound, Check, AlertCircle,
-  Clock, Edit2, Save, Trophy, Eye, EyeOff
+  Clock, Edit2, Save, Trophy, Eye, EyeOff, FileText
 } from 'lucide-react';
 
 import { UserProfile, PaymentHistoryItem, SupportTicket } from '../types';
 import { userService } from '../services/userService';
 import { PRICE_INR, LANGUAGES } from '../constants';
+import { SupportModal } from './SupportModal';
 
 interface ProfileModalProps {
   isOpen: boolean;
   user: UserProfile | null;
   onClose: () => void;
   onLogout: () => void;
+  // Added onOpenAuth prop to ProfileModalProps
+  onOpenAuth: () => void;
 }
 
 export const ProfileModal: React.FC<ProfileModalProps> = ({
   isOpen,
   user,
   onClose,
-  onLogout
+  onLogout,
+  // Destructure onOpenAuth prop
+  onOpenAuth
 }) => {
   const [activeTab, setActiveTab] = useState<'info' | 'subscriptions' | 'tickets'>('info');
   const [payments, setPayments] = useState<PaymentHistoryItem[]>([]);
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [showRaiseTicket, setShowRaiseTicket] = useState(false);
 
-  // Editor States
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [profileLoading, setProfileLoading] = useState(false);
 
-  // Password States
   const [showPassChange, setShowPassChange] = useState(false);
   const [passForm, setPassForm] = useState({ current: '', new: '', confirm: '' });
   const [showPasswords, setShowPasswords] = useState(false);
@@ -56,12 +60,18 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 
   const loadData = async (type: 'sub' | 'tkt') => {
     setLoading(true);
-    if (type === 'sub') setPayments(await userService.getPaymentHistory());
-    else setTickets(await userService.getTicketHistory());
-    setLoading(false);
+    try {
+      if (type === 'sub') setPayments(await userService.getPaymentHistory());
+      else setTickets(await userService.getTicketHistory());
+    } catch (e: any) {
+      console.warn("Failed to load profile data:", e?.message || e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const resolveFullModuleName = (key: string) => {
+    if (!key) return 'General Access';
     const parts = key.split(/[-→]/).map(p => p.trim());
     if (parts.length !== 2) return key;
     const s = LANGUAGES.find(l => l.code === parts[0])?.name || parts[0];
@@ -129,12 +139,17 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 
   if (!isOpen || !user) return null;
 
+  // Robust check for pro status background
+  const hasProSub = user.subscriptions && typeof user.subscriptions === 'object' && Object.keys(user.subscriptions).length > 0;
+
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      {/* Fixed SupportModal: added missing onOpenAuth property */}
+      <SupportModal isOpen={showRaiseTicket} onClose={() => setShowRaiseTicket(false)} onOpenAuth={onOpenAuth} />
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md max-h-[85vh] overflow-hidden flex flex-col animate-in zoom-in-95">
         
-        <div className={`p-8 flex flex-col items-center relative shrink-0 ${user.subscriptions && Object.keys(user.subscriptions).length > 0 ? 'bg-premium text-slate-900' : 'bg-[#1d4683] text-white'}`}>
+        <div className={`p-8 flex flex-col items-center relative shrink-0 ${hasProSub ? 'bg-premium text-slate-900' : 'bg-[#1d4683] text-white'}`}>
           <button onClick={onClose} className="absolute top-6 right-6 opacity-50 hover:opacity-100"><X size={24} /></button>
           <div className="flex items-center gap-6 mb-4">
              <div className="w-16 h-16 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20">
@@ -144,13 +159,13 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
           </div>
           <h2 className="text-2xl font-black tracking-tight">{user.name || 'Learner'}</h2>
           <p className="text-xs font-black uppercase tracking-widest opacity-70">
-            Tier: {Object.keys(user.subscriptions || {}).length > 0 ? 'Expert' : 'Seeker'}
+            Role: {(user.role || 'user').replace('_', ' ')}
           </p>
         </div>
 
-        <div className="flex border-b bg-slate-50/50">
+        <div className="flex border-b bg-slate-50/50 overflow-x-auto scrollbar-hide shrink-0">
           {['info', 'subscriptions', 'tickets'].map((t: any) => (
-            <button key={t} onClick={() => setActiveTab(t)} className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest border-b-4 transition-all ${activeTab === t ? 'border-[#1d4683] text-[#1d4683]' : 'border-transparent text-slate-400'}`}>{t}</button>
+            <button key={t} onClick={() => setActiveTab(t)} className={`flex-1 py-4 px-4 text-[10px] font-black uppercase tracking-widest border-b-4 transition-all whitespace-nowrap ${activeTab === t ? 'border-[#1d4683] text-[#1d4683]' : 'border-transparent text-slate-400'}`}>{t}</button>
           ))}
         </div>
 
@@ -250,7 +265,12 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 
           {activeTab === 'subscriptions' && (
             <div className="space-y-4">
-              {payments.map(p => (
+              {loading ? (
+                <div className="flex flex-col items-center justify-center py-10 text-slate-400 gap-3">
+                  <Loader2 className="animate-spin" size={24} />
+                  <p className="text-[10px] font-black uppercase">Loading Subscriptions...</p>
+                </div>
+              ) : payments.map(p => (
                 <div key={p.id} className="p-5 border rounded-3xl space-y-3 bg-white shadow-sm border-slate-100">
                   <div className="flex justify-between items-start">
                     <h4 className="text-sm font-black text-slate-800">{resolveFullModuleName(p.module)}</h4>
@@ -259,19 +279,28 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   <div className="flex items-center gap-2 text-[10px] text-slate-400 font-bold"><Clock size={12}/> Valid: {new Date(p.expiry).toLocaleDateString()}</div>
                 </div>
               ))}
-              {payments.length === 0 && <div className="text-center py-10 opacity-30 font-black text-xs uppercase tracking-widest"><CreditCard size={32} className="mx-auto mb-2"/> No active modules</div>}
+              {!loading && payments.length === 0 && <div className="text-center py-10 opacity-30 font-black text-xs uppercase tracking-widest"><CreditCard size={32} className="mx-auto mb-2"/> No active modules</div>}
             </div>
           )}
 
           {activeTab === 'tickets' && (
             <div className="space-y-3">
-              {tickets.map(t => (
+              {loading ? (
+                <div className="flex flex-col items-center justify-center py-10 text-slate-400 gap-3">
+                  <Loader2 className="animate-spin" size={24} />
+                  <p className="text-[10px] font-black uppercase">Loading Tickets...</p>
+                </div>
+              ) : tickets.map(t => (
                 <div key={t.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                  <div className="flex justify-between text-[10px] font-black text-[#1d4683] uppercase mb-2"><span>Ref: {t.id.slice(0,8)}</span><span className="text-slate-400">{new Date(t.created_at || '').toLocaleDateString()}</span></div>
+                  <div className="flex justify-between text-[10px] font-black text-[#1d4683] uppercase mb-2">
+                    <span>Ref: {t.ticket_no || t.id.slice(0,8)}</span>
+                    <span className={t.status === 'resolved' ? 'text-green-600' : 'text-amber-600'}>{t.status}</span>
+                  </div>
                   <p className="text-xs text-slate-700 font-medium">{t.message}</p>
+                  <p className="text-[8px] text-slate-400 mt-2">{t.created_at ? new Date(t.created_at).toLocaleString() : ''}</p>
                 </div>
               ))}
-              {tickets.length === 0 && <div className="text-center py-10 opacity-30 font-black text-xs uppercase tracking-widest"><MessageSquare size={32} className="mx-auto mb-2"/> No inquiry logs</div>}
+              {!loading && tickets.length === 0 && <div className="text-center py-10 opacity-30 font-black text-xs uppercase tracking-widest"><MessageSquare size={32} className="mx-auto mb-2"/> No inquiry logs</div>}
             </div>
           )}
         </div>

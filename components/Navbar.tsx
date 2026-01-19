@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { BookOpen, MessageCircle, GraduationCap, User as UserIcon, Crown, LogIn, HelpCircle, Flame, Lock } from 'lucide-react';
+import { BookOpen, MessageCircle, GraduationCap, User as UserIcon, Crown, LogIn, HelpCircle, Flame, Lock, Shield } from 'lucide-react';
 import { UserProfile } from '../types';
 import { APP_LOGO, APP_NAME } from '../constants';
 
@@ -13,11 +13,12 @@ interface NavbarProps {
   onOpenProfile: () => void;
   onOpenSupport: () => void;
   onOpenSubscribe: () => void;
+  onOpenAdmin?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   user, activeTab, onTabChange, isPro,
-  onOpenAuth, onOpenProfile, onOpenSupport, onOpenSubscribe
+  onOpenAuth, onOpenProfile, onOpenSupport, onOpenSubscribe, onOpenAdmin
 }) => {
   const [streak, setStreak] = useState(1);
   const [logoSrc, setLogoSrc] = useState(APP_LOGO);
@@ -44,6 +45,8 @@ export const Navbar: React.FC<NavbarProps> = ({
       setStreak(currentStreak);
     }
   }, []);
+
+  const showAdminButton = user?.isAuthenticated && ['global_admin', 'admin', 'support_agent'].includes(user.role || '');
 
   return (
     <nav className="bg-white border-b border-slate-200 sticky top-0 z-40 w-full no-print">
@@ -80,10 +83,20 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <div className="flex items-center gap-1.5 sm:gap-4">
             <div className="flex items-center gap-1.5 sm:gap-3 border-r pr-2 sm:pr-4 border-slate-100">
-                {/* ⚡ DAILY STREAK DISPLAY */}
+                
+                {showAdminButton && (
+                  <button 
+                    onClick={onOpenAdmin}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase hover:bg-black transition-all shadow-md"
+                  >
+                    <Shield size={14} className="text-indigo-400" />
+                    {user.role === 'global_admin' ? 'Global Admin View' : `${(user.role || 'admin').replace('_', ' ')} View`}
+                  </button>
+                )}
+
                 <div 
                   className="flex items-center gap-1 px-2 py-1.5 bg-orange-50 text-orange-600 rounded-xl text-xs font-black border border-orange-100 cursor-help" 
-                  title="Your Learning Streak: Number of consecutive days you have practiced."
+                  title="Your Learning Streak"
                 >
                     <Flame size={14} className="fill-orange-500 text-orange-600" />
                     <span className="text-sm">{streak}</span>
@@ -91,7 +104,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
                 <button 
                     onClick={onOpenSubscribe}
-                    title={isPro ? "Pro Status: Unlimited access to all modules active." : "Go Pro: Unlock all language pairs, quizzes, and contribution rewards."}
                     className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[10px] sm:text-xs font-bold transition-all border ${isPro ? 'bg-gradient-to-r from-amber-50 to-amber-100 text-amber-800 border-amber-200 shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}
                 >
                     <Crown size={14} className={isPro ? "fill-amber-500 text-amber-600" : "text-slate-400"} />
@@ -101,7 +113,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                 {user?.isAuthenticated ? (
                     <button 
                       onClick={onOpenProfile} 
-                      title="Profile & Settings: Manage your account, phone number, and subscriptions."
                       className="p-1 bg-slate-50 hover:bg-indigo-50 border border-slate-200 rounded-full transition-all group"
                     >
                         <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
@@ -109,7 +120,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         </div>
                     </button>
                 ) : (
-                    <button onClick={onOpenAuth} className="p-2 bg-slate-900 text-white rounded-full hover:bg-black transition-all shadow-lg active:scale-95" title="Sign In: Sync your progress and contribute to the dictionary.">
+                    <button onClick={onOpenAuth} className="p-2 bg-slate-900 text-white rounded-full hover:bg-black transition-all shadow-lg active:scale-95">
                         <LogIn size={16} />
                     </button>
                 )}
@@ -127,22 +138,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                     alt="Logo" 
                     className="w-full h-full object-contain p-0.5" 
                     onError={() => {
-                      if (logoSrc.startsWith('/')) {
-                        setLogoSrc('./Logo.png');
-                      } else {
-                        setImageError(true);
-                      }
+                      if (logoSrc.startsWith('/')) setLogoSrc('./Logo.png');
+                      else setImageError(true);
                     }} 
                   />
                 ) : (
-                  <div className="w-full h-full bg-[#1d4683] flex items-center justify-center text-white font-black text-[10px]">
-                    LA
-                  </div>
+                  <div className="w-full h-full bg-[#1d4683] flex items-center justify-center text-white font-black text-[10px]">LA</div>
                 )}
               </div>
             </div>
           </div>
-
         </div>
       </div>
       
