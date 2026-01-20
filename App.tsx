@@ -1,31 +1,28 @@
-
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { LANGUAGES, DEFAULT_SOURCE_LANG, DEFAULT_TARGET_LANG, LIMIT_STUDY, LIMIT_CHARS, LIMIT_CHATS, LIMIT_QUIZZES, APP_VERSION, SUPPORT_WHATSAPP } from './constants';
-import { TranslationResult, UserProfile, LessonResponse, LessonItem, MatrixEntry, MatrixLangData } from './types';
-import { translateText, generateLessons } from './services/geminiService';
-import { cacheService } from './services/cacheService';
-import { userService, getModuleKey } from './services/userService';
-import { isTransliterationSupported, transliterateWord } from './services/transliterationService';
-import { AudioPlayer } from './components/AudioPlayer';
-import { ChatInterface } from './components/ChatInterface';
-import { QuizInterface } from './components/QuizInterface';
-import { AboutSection } from './components/AboutSection';
-import { SubscriptionModal } from './components/SubscriptionModal';
-import { AuthModal } from './components/AuthModal';
-import { ProfileModal } from './components/ProfileModal';
-import { SupportModal } from './components/SupportModal';
-import { PhraseDetailModal } from './components/PhraseDetailModal';
-import { Navbar } from './components/Navbar';
-import { AdminDashboard } from './components/AdminDashboard';
-import { MASTER_DICTIONARY } from './data/masterDictionary';
-// Add FileText icon to the list of imports from lucide-react
+import { LANGUAGES, DEFAULT_SOURCE_LANG, DEFAULT_TARGET_LANG, LIMIT_STUDY, LIMIT_CHARS, LIMIT_CHATS, LIMIT_QUIZZES, APP_VERSION, SUPPORT_WHATSAPP } from './constants.ts';
+import { TranslationResult, UserProfile, LessonResponse, LessonItem } from './types.ts';
+import { translateText, generateLessons } from './services/geminiService.ts';
+import { cacheService } from './services/cacheService.ts';
+import { userService } from './services/userService.ts';
+import { transliterateWord } from './services/transliterationService.ts';
+import { AudioPlayer } from './components/AudioPlayer.tsx';
+import { ChatInterface } from './components/ChatInterface.tsx';
+import { QuizInterface } from './components/QuizInterface.tsx';
+import { AboutSection } from './components/AboutSection.tsx';
+import { SubscriptionModal } from './components/SubscriptionModal.tsx';
+import { AuthModal } from './components/AuthModal.tsx';
+import { ProfileModal } from './components/ProfileModal.tsx';
+import { SupportModal } from './components/SupportModal.tsx';
+import { PhraseDetailModal } from './components/PhraseDetailModal.tsx';
+import { Navbar } from './components/Navbar.tsx';
+import { AdminDashboard } from './components/AdminDashboard.tsx';
+import { MASTER_DICTIONARY } from './data/masterDictionary.ts';
+import { supabase } from './lib/supabaseClient.ts';
 import {
   ArrowRightLeft, Loader2, Lock, Check,
-  BookOpen, Sparkles, Zap, ArrowRight, MousePointer2,
-  RefreshCw, Keyboard, Type, ChevronDown, ThumbsUp,
-  Info, Sparkle, Laptop, X, Save, CheckCircle, Database, AlertCircle, Key, Globe2,
-  CloudLightning, Globe, Users, CheckCircle2, Share2, Wrench, FolderOpen, LayoutGrid, Library, ChevronDownCircle,
-  Trophy, HelpCircle, Headphones, MessageCircle, FileText
+  BookOpen, Sparkles, Zap, MousePointer2,
+  Keyboard, Sparkle, Share2, Library,
+  Trophy, HelpCircle, Headphones, MessageCircle, FileText, CheckCircle2, ThumbsUp
 } from 'lucide-react';
 
 type Tab = 'translate' | 'chat' | 'quiz' | 'about' | 'library';
@@ -58,7 +55,6 @@ const App: React.FC = () => {
   const [isTranslating, setIsTranslating] = useState(false);
   const [result, setResult] = useState<TranslationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'searching' | 'found' | 'saved'>('idle');
 
   const [lessonsData, setLessonsData] = useState<LessonResponse | null>(null);
   const [isLoadingLessons, setIsLoadingLessons] = useState(false);
@@ -98,7 +94,25 @@ const App: React.FC = () => {
     }
   }, [sourceLang, targetLang, isSubscribePending]);
 
-  useEffect(() => { syncUser(); }, [syncUser]);
+  useEffect(() => { 
+    syncUser(); 
+
+    // 🛡️ AUTH EVENT LISTENER (Handles Password Recovery & Session Changes)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setShowAuthModal(true);
+      } else if (event === 'SIGNED_IN') {
+        syncUser();
+      } else if (event === 'SIGNED_OUT') {
+        setUserProfile(null);
+        setModuleStatus(prev => ({ ...prev, isPro: false, isAuthenticated: false }));
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [syncUser]);
 
   const loadLessons = useCallback(async (overrideProStatus?: boolean) => {
       setIsLoadingLessons(true);
@@ -213,7 +227,6 @@ const App: React.FC = () => {
         if (inputLatinBuffer.length > 2) finalMatrix[sourceLang] = { n: textToUse, l: inputLatinBuffer };
         await userService.saveMatrixEntry({ en_anchor: data.en_anchor!, category: data.category || 'Collective Intelligence', matrix_data: finalMatrix });
         await userService.saveUserLesson(data.originalText, data.translatedText, localBridge, sourceLang, targetLang, data.category);
-        setSaveStatus('saved');
       }
 
       if (!moduleStatus.isPro) {
@@ -252,7 +265,7 @@ const App: React.FC = () => {
         setInputText(newVal);
         setInputLatinBuffer(prev => (prev + " " + wordBuffer).trim());
         setWordBuffer('');
-        setTimeout(() => { el.selectionStart = el.selectionEnd = start + t.length + 1; el.focus(); }, 0);
+        setTimeout(() => { if (el) { el.selectionStart = el.selectionEnd = start + t.length + 1; el.focus(); } }, 0);
       }
       return; 
     }
@@ -294,7 +307,6 @@ const App: React.FC = () => {
     <div className={`min-h-screen bg-slate-50 flex flex-col transition-all duration-500 ${moduleStatus.isPro ? 'premium-gold' : ''}`}>
       <AuthModal isOpen={showAuthModal} onClose={() => { setShowAuthModal(false); setIsSubscribePending(false); }} onSuccess={() => { setShowAuthModal(false); syncUser(); }} />
       <SubscriptionModal isOpen={showSubModal} moduleName={currentModuleName} onClose={() => setShowSubModal(false)} onSubscribe={async (d, p) => { await userService.subscribeToModule(sourceLang, targetLang, d, p); syncUser(true); }} />
-      {/* Updated ProfileModal: added onOpenAuth prop */}
       <ProfileModal 
         isOpen={showProfileModal} 
         user={userProfile} 
@@ -316,7 +328,6 @@ const App: React.FC = () => {
 
       <Navbar user={userProfile} activeTab={activeTab as any} onTabChange={(t) => setActiveTab(t as any)} isPro={moduleStatus.isPro} onOpenAuth={() => setShowAuthModal(true)} onOpenProfile={() => setShowProfileModal(true)} onOpenSupport={() => setShowSupportModal(true)} onOpenSubscribe={handleOpenSubscribe} onOpenAdmin={() => setShowAdminDashboard(true)} />
 
-      {/* Main Support Access on Home */}
       <button 
         onClick={() => setShowSupportModal(true)}
         className="fixed bottom-6 right-6 z-[55] p-4 bg-[#1d4683] text-white rounded-full shadow-2xl hover:bg-black hover:scale-110 active:scale-95 transition-all group flex items-center gap-2"
@@ -462,7 +473,6 @@ const App: React.FC = () => {
                   </div>
               </div>
 
-              {/* Home Page Support & Quick Help section */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-10 border-t border-slate-100">
                  <div className="bg-[#1d4683] text-white p-8 rounded-[2.5rem] shadow-xl flex flex-col justify-between">
                     <div>

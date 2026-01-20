@@ -1,11 +1,10 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
-import { TranslationResult, QuizResult, ChatMessage, LessonResponse, MatrixLangData, LessonItem } from '../types';
-import { cacheService } from './cacheService';
-import { userService } from './userService';
-import { generateStaticLessons } from '../data/staticLessons';
-import { generateLocalQuiz } from './localQuizService';
-import { LANGUAGES } from '../constants';
+import { TranslationResult, QuizResult, ChatMessage, LessonResponse, MatrixLangData, LessonItem } from '../types.ts';
+import { cacheService } from './cacheService.ts';
+import { userService } from './userService.ts';
+import { generateStaticLessons } from '../data/staticLessons.ts';
+import { generateLocalQuiz } from './localQuizService.ts';
+import { LANGUAGES } from '../constants.ts';
 
 const preFixTypos = (text: string): string => {
   return text.replace(/\b(\w+)\b/g, (word) => {
@@ -55,8 +54,8 @@ const TUTOR_STRINGS: Record<string, any> = {
     fallback: (w: string, r: string) => `ਮੈਂ ਮਦਦ ਲਈ ਇੱਥੇ ਹਾਂ! "${w}" ਮੇਰੀ ਸੂਚੀ ਵਿੱਚ ਨਹੀਂ ਹੈ, ਕੀ ਤੁਹਾਨੂੰ "${r}" ਦਾ ਪਤਾ ਹੈ?`
   },
   ur: {
-    meaning: (w: string, m: string, b: string) => `منتخب کردہ لفظ "${w}" کا مطلب "${m}" ہے۔ آپ اسے "${b}" پڑھ سکتے ہیں۔`,
-    fallback: (w: string, r: string) => `میں مدد کے لیے حاضر ہوں! "${w}" میرے پاس نہیں ہے، کیا آپ "${r}" جانتے ہیں؟`
+    meaning: (w: string, m: string, b: string) => `منتخب کردہ لفظ "${w}" का मतलब "${m}" ہے۔ آپ اسے "${b}" पढ़ सकते हैं।`,
+    fallback: (w: string, r: string) => `मैं मदद के लिए हाजिर हूँ! शब्द "${w}" मेरी फेहरिस्त में नहीं है, क्या आप "${r}" का मतलब जानते हैं?`
   },
   as: {
     meaning: (w: string, m: string, b: string) => `নিৰ্বাচিত শব্দ "${w}" ৰ অৰ্থ হ'ল "${m}"। আপুনি ইয়াক "${b}" বুলি পঢ়িব পাৰে।`,

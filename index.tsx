@@ -1,6 +1,6 @@
 import React from 'react';
-import ReactDOM from 'react-dom/client';
-import App from './App';
+import { createRoot } from 'react-dom/client';
+import App from './App.tsx';
 
 // 🛡️ SECURITY ENGINE: PROTECTION AGAINST COPY & CAPTURE
 const enableSecurity = () => {
@@ -28,7 +28,8 @@ const enableSecurity = () => {
     const key = e.key.toLowerCase();
     
     // Check if target is an input before deciding whether to block certain keys like 'c' (copy)
-    const isInputField = (e.target as HTMLElement).tagName === 'TEXTAREA' || (e.target as HTMLElement).tagName === 'INPUT';
+    const target = e.target as HTMLElement;
+    const isInputField = target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT');
 
     if (
       (isCmdOrCtrl && ['s', 'p', 'u'].includes(key)) ||
@@ -58,7 +59,7 @@ if (!rootElement) {
   throw new Error("Could not find root element to mount to");
 }
 
-const root = ReactDOM.createRoot(rootElement);
+const root = createRoot(rootElement);
 root.render(
   <React.StrictMode>
     <App />

@@ -1,5 +1,4 @@
-
-import { LanguageOption } from './types';
+import { LanguageOption } from './types.ts';
 
 export const LANGUAGES: LanguageOption[] = [
 // Indian Languages
