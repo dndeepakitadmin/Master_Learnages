@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { LANGUAGES, DEFAULT_SOURCE_LANG, DEFAULT_TARGET_LANG, LIMIT_STUDY, LIMIT_CHARS, LIMIT_CHATS, LIMIT_QUIZZES, APP_VERSION, SUPPORT_WHATSAPP } from './constants.ts';
 import { TranslationResult, UserProfile, LessonResponse, LessonItem } from './types.ts';
@@ -12,25 +13,37 @@ import { AboutSection } from './components/AboutSection.tsx';
 import { SubscriptionModal } from './components/SubscriptionModal.tsx';
 import { AuthModal } from './components/AuthModal.tsx';
 import { ProfileModal } from './components/ProfileModal.tsx';
-import { SupportModal } from './components/SupportModal.tsx';
 import { PhraseDetailModal } from './components/PhraseDetailModal.tsx';
+import { SupportModal } from './components/SupportModal.tsx';
 import { Navbar } from './components/Navbar.tsx';
 import { AdminDashboard } from './components/AdminDashboard.tsx';
+import { Flashcard } from './components/Flashcard.tsx';
 import { MASTER_DICTIONARY } from './data/masterDictionary.ts';
 import { supabase } from './lib/supabaseClient.ts';
 import {
   ArrowRightLeft, Loader2, Lock, Check,
   BookOpen, Sparkles, Zap, MousePointer2,
-  Keyboard, Sparkle, Share2, Library,
-  Trophy, HelpCircle, Headphones, MessageCircle, FileText, CheckCircle2, ThumbsUp
+  Keyboard, Sparkle, Share2, Library, Info,
+  Trophy, HelpCircle, Headphones, MessageCircle, FileText, CheckCircle2, ThumbsUp, AlertTriangle, X, RefreshCw, UserPlus, Crown, Link as LinkIcon,
+  ShoppingBag, Stethoscope, Users as UsersIcon, Coffee, GraduationCap, Map as MapIcon, Heart, Globe2
 } from 'lucide-react';
 
 type Tab = 'translate' | 'chat' | 'quiz' | 'about' | 'library';
-type AppMode = 'indian_kannadiga' | 'kannadiga_indian' | 'global_indian';
+
+const CATEGORY_ICONS: Record<string, React.ReactNode> = {
+  'In the Market': <ShoppingBag size={24} />,
+  'Talking to a Doctor': <Stethoscope size={24} />,
+  'Talking to a Friend': <UsersIcon size={24} />,
+  'Basics': <Zap size={24} />,
+  'Verbs': <RefreshCw size={24} />,
+  'Pronouns': <UsersIcon size={24} />,
+  'Conversation': <MessageCircle size={24} />,
+  'Collective Knowledge': <Globe2 size={24} />,
+  'My Findings': <Heart size={24} />
+};
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('translate');
-  const [appMode, setAppMode] = useState<AppMode>('global_indian');
   const [sourceLang, setSourceLang] = useState(DEFAULT_SOURCE_LANG);
   const [targetLang, setTargetLang] = useState(DEFAULT_TARGET_LANG);
 
@@ -47,14 +60,13 @@ const App: React.FC = () => {
   const [showSupportModal, setShowSupportModal] = useState(false);
   const [showAdminDashboard, setShowAdminDashboard] = useState(false);
   
-  const [isSubscribePending, setIsSubscribePending] = useState(false);
   const [selectedPhrase, setSelectedPhrase] = useState<LessonItem | null>(null);
 
   const [inputText, setInputText] = useState('');
-  const [inputLatinBuffer, setInputLatinBuffer] = useState(''); 
   const [isTranslating, setIsTranslating] = useState(false);
   const [result, setResult] = useState<TranslationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const [lessonsData, setLessonsData] = useState<LessonResponse | null>(null);
   const [isLoadingLessons, setIsLoadingLessons] = useState(false);
@@ -62,15 +74,15 @@ const App: React.FC = () => {
   const [smartTypingMode, setSmartTypingMode] = useState(true); 
   const [showSuggestions, setShowSuggestions] = useState(true);
   const [wordBuffer, setWordBuffer] = useState('');
-  const [verified, setVerified] = useState(false);
 
   const [currentSuggestions, setCurrentSuggestions] = useState<LessonItem[]>([]);
-  const [newVersionAvailable, setNewVersionAvailable] = useState(false);
-
+  const [dbSuggestions, setDbSuggestions] = useState<LessonItem[]>([]);
+  
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const getLangName = useCallback((code: string) => {
-    return LANGUAGES.find(l => l.code === code)?.name || code;
+    const lang = LANGUAGES.find(l => l.code === code);
+    return lang ? lang.name : code;
   }, []);
 
   const syncUser = useCallback(async (skipHeavySeeding = false) => {
@@ -82,9 +94,8 @@ const App: React.FC = () => {
       setUserProfile(user);
       const status = await userService.getModuleStatus(sourceLang, targetLang);
       setModuleStatus(status as any);
-      
-      if (user.isAuthenticated && isSubscribePending) {
-        setIsSubscribePending(false);
+
+      if (user.isAuthenticated && !status.isPro && status.usageChars >= LIMIT_CHARS) {
         setShowSubModal(true);
       }
     } catch (e) {
@@ -92,32 +103,25 @@ const App: React.FC = () => {
     } finally {
       setIsInitialLoading(false);
     }
-  }, [sourceLang, targetLang, isSubscribePending]);
+  }, [sourceLang, targetLang]);
 
   useEffect(() => { 
     syncUser(); 
-
-    // 🛡️ AUTH EVENT LISTENER (Handles Password Recovery & Session Changes)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') {
-        setShowAuthModal(true);
-      } else if (event === 'SIGNED_IN') {
-        syncUser();
-      } else if (event === 'SIGNED_OUT') {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') syncUser();
+      else if (event === 'SIGNED_OUT') {
         setUserProfile(null);
-        setModuleStatus(prev => ({ ...prev, isPro: false, isAuthenticated: false }));
+        setModuleStatus(prev => ({ ...prev, isPro: false, isAuthenticated: false, usageChars: 0 }));
       }
     });
-
     return () => {
-      subscription.unsubscribe();
+      authListener.subscription.unsubscribe();
     };
-  }, [syncUser]);
+  }, [syncUser, sourceLang, targetLang]);
 
-  const loadLessons = useCallback(async (overrideProStatus?: boolean) => {
+  const loadLessons = useCallback(async () => {
       setIsLoadingLessons(true);
-      const currentPro = overrideProStatus !== undefined ? overrideProStatus : moduleStatus.isPro;
-      const tier = currentPro ? 'premium' : 'free';
+      const tier = moduleStatus.isPro ? 'premium' : 'free';
       try {
         const data = await generateLessons(sourceLang, targetLang, tier, getLangName(sourceLang), getLangName(targetLang));
         setLessonsData(data);
@@ -129,143 +133,106 @@ const App: React.FC = () => {
     if (!isInitialLoading) loadLessons();
   }, [loadLessons, isInitialLoading]);
 
-  // Version Check Logic
   useEffect(() => {
-    const storedVersion = localStorage.getItem('app_version');
-    if (storedVersion && storedVersion !== APP_VERSION) {
-      setNewVersionAvailable(true);
-    } else if (!storedVersion) {
-      localStorage.setItem('app_version', APP_VERSION);
-    }
-  }, []);
+    if (!showSuggestions) return;
+    const queryStr = wordBuffer || inputText;
+    if (queryStr.length < 3) { setDbSuggestions([]); return; }
+    const handler = setTimeout(async () => {
+      try {
+        const cloudSuggestions = await userService.searchMatrixSuggestions(queryStr, sourceLang, targetLang);
+        setDbSuggestions(cloudSuggestions);
+      } catch (e) { console.warn("Cloud suggestions error", e); }
+    }, 400);
+    return () => clearTimeout(handler);
+  }, [inputText, wordBuffer, sourceLang, targetLang, showSuggestions]);
 
-  const handleVersionRefresh = () => {
-    localStorage.setItem('app_version', APP_VERSION);
-    window.location.reload();
-  };
-
-  // Behavior & Locking Rules
   useEffect(() => {
-    if (appMode === 'indian_kannadiga') {
-      setTargetLang('kn');
-      if (sourceLang === 'kn') setSourceLang('hi');
-    } else if (appMode === 'kannadiga_indian') {
-      setSourceLang('kn');
-      if (targetLang === 'kn') setTargetLang('hi');
-    }
-  }, [appMode, sourceLang, targetLang]);
-
-  // Suggestions Logic
-  useEffect(() => {
-    if (!showSuggestions) {
-      setCurrentSuggestions([]);
-      return;
-    }
-
-    const totalInputNative = sourceLang === 'en' 
-      ? inputText 
-      : inputText + transliterateWord(wordBuffer, sourceLang);
-
-    if (totalInputNative.length < 3) {
-      setCurrentSuggestions([]);
-      return;
-    }
-
-    const normalizeForMatch = (s: string) => s.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()!?]/g, "").trim();
-    const prefix = normalizeForMatch(totalInputNative);
-
+    if (!showSuggestions) { setCurrentSuggestions([]); return; }
+    const totalInputNative = inputText + (wordBuffer ? transliterateWord(wordBuffer, sourceLang) : '');
+    if (totalInputNative.length < 3 && wordBuffer.length < 3) { setCurrentSuggestions([]); return; }
+    const normalizeForMatch = (s: any) => (s || '').toString().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()!?]/g, "");
+    const prefixStr = normalizeForMatch(totalInputNative);
     const dictionaryMatches = MASTER_DICTIONARY.filter(ph => {
-      const ld = ph.langs[sourceLang];
-      if (!ld || !ld.native) return false;
-      const sentence = normalizeForMatch(ld.native);
-      return sentence.startsWith(prefix);
-    }).map(ph => ({
-      source_native: ph.langs[sourceLang].native,
-      source_transliteration: ph.langs[sourceLang].latin,
-      target_native: ph.langs[targetLang]?.native || '',
-      target_transliteration: ph.langs[targetLang]?.latin || '',
-      target_in_source_script: ph.langs[targetLang]?.b?.[sourceLang] || '',
-      meaning_english: ph.en_meaning,
-      note: ph.category
-    }));
-
-    const lessonMatches = (lessonsData?.lessons || []).filter(l => {
-      const sentence = normalizeForMatch(l.source_native);
-      return sentence.startsWith(prefix);
+      const ld = ph.langs?.[sourceLang];
+      const entryText = normalizeForMatch(ld?.native || ph.en_meaning);
+      return entryText.startsWith(prefixStr);
+    }).map(ph => {
+      const targetData = ph.langs?.[targetLang] || { native: '', latin: '', phonetic_mode: 'native', b: {} };
+      const sourceBridge = targetData.b?.[sourceLang] || transliterateWord(targetData.latin, sourceLang);
+      return {
+        source_native: ph.langs?.[sourceLang]?.native || ph.en_meaning,
+        source_transliteration: ph.langs?.[sourceLang]?.latin || "",
+        target_native: targetData.native,
+        target_transliteration: targetData.latin,
+        target_in_source_script: sourceBridge,
+        meaning_english: ph.en_meaning,
+        note: ph.category
+      };
     });
-
-    const combined = [...lessonMatches, ...dictionaryMatches]
-      .filter((v, i, a) => a.findIndex(t => t.source_native === v.source_native) === i)
+    const lessonMatches = (lessonsData?.lessons || []).filter(l => {
+      const entryText = normalizeForMatch(l.source_native);
+      return entryText.startsWith(prefixStr);
+    });
+    const combined = [...lessonMatches, ...dictionaryMatches, ...dbSuggestions]
+      .filter((v, i, a) => a.findIndex(t => normalizeForMatch(t.source_native) === normalizeForMatch(v.source_native)) === i)
       .slice(0, 15);
-
     setCurrentSuggestions(combined as LessonItem[]);
-  }, [inputText, wordBuffer, sourceLang, targetLang, lessonsData, showSuggestions]);
+  }, [inputText, wordBuffer, sourceLang, targetLang, lessonsData, showSuggestions, dbSuggestions]);
 
   const handleTranslate = useCallback(async (forcedText?: string, bypassCache: boolean = false) => {
-    let textToUse = (forcedText || inputText).trim();
-    if (!textToUse) return;
-    if (!moduleStatus.isPro && (moduleStatus.usageChars + textToUse.length) > LIMIT_CHARS) {
-      if (!forcedText) { 
-        setIsSubscribePending(true); 
-        setShowAuthModal(true); 
+    let textToUse = (forcedText || inputText); 
+    if (!textToUse.trim()) return;
+    const charCount = textToUse.length; 
+    if (!moduleStatus.isPro) {
+      if ((moduleStatus.usageChars + charCount) > moduleStatus.limitChars) {
+        if (!userProfile?.isAuthenticated) setShowAuthModal(true);
+        else setShowSubModal(true);
+        return;
       }
-      return;
     }
-
     setIsTranslating(true);
     setError(null);
-    setVerified(false);
-    
+    abortControllerRef.current = new AbortController();
     try {
-      const data = await translateText(textToUse, sourceLang, targetLang, bypassCache);
-      const localBridge = transliterateWord(data.pronunciationLatin || '', sourceLang);
-      data.pronunciationSourceScript = localBridge;
+      const data = await translateText(textToUse.trim(), sourceLang, targetLang, bypassCache, abortControllerRef.current.signal);
       setResult(data);
-
-      if (data.en_anchor && data.matrix) {
-        const finalMatrix = { ...data.matrix };
-        if (inputLatinBuffer.length > 2) finalMatrix[sourceLang] = { n: textToUse, l: inputLatinBuffer };
-        await userService.saveMatrixEntry({ en_anchor: data.en_anchor!, category: data.category || 'Collective Intelligence', matrix_data: finalMatrix });
-        await userService.saveUserLesson(data.originalText, data.translatedText, localBridge, sourceLang, targetLang, data.category);
-      }
-
       if (!moduleStatus.isPro) {
-        const newCount = await userService.incrementUsage(sourceLang, targetLang, textToUse.length, 'chars');
-        setModuleStatus(prev => ({ ...prev, usageChars: newCount }));
+        const newTotal = await userService.incrementUsage(sourceLang, targetLang, charCount, 'chars');
+        setModuleStatus(prev => ({ ...prev, usageChars: newTotal }));
+      }
+      if (userProfile?.isAuthenticated) {
+        await userService.saveUserLesson(data.originalText, data.translatedText, data.pronunciationSourceScript || '', sourceLang, targetLang, data.category);
+        loadLessons();
       }
     } catch (err: any) { 
-      setError(err.message || "Intelligence is busy."); 
+      if (err.name === 'AbortError') setError("Translation cancelled.");
+      else setError(err.message || "Sync error."); 
     } finally { 
       setIsTranslating(false); 
+      abortControllerRef.current = null;
     }
-  }, [inputText, inputLatinBuffer, sourceLang, targetLang, moduleStatus]);
+  }, [inputText, sourceLang, targetLang, userProfile, moduleStatus.usageChars, moduleStatus.limitChars, moduleStatus.isPro, loadLessons]);
+
+  const cancelTranslation = () => { if (abortControllerRef.current) abortControllerRef.current.abort(); };
 
   const insertTextAtCursor = (textToInsert: string, rawPhonetic: string) => {
-    const el = textareaRef.current;
-    if (!el) return;
     setInputText(textToInsert);
     setWordBuffer('');
-    if (sourceLang !== 'en') setInputLatinBuffer(rawPhonetic);
-    else setInputLatinBuffer('');
-    setTimeout(() => { el.focus(); el.selectionStart = el.selectionEnd = textToInsert.length; }, 0);
+    setTimeout(() => textareaRef.current?.focus(), 0);
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (!smartTypingMode || sourceLang === 'en') return;
-    const el = textareaRef.current;
-    if (e.ctrlKey || e.metaKey) return;
-    if (e.key === 'Backspace') { if (wordBuffer) { e.preventDefault(); setWordBuffer(prev => prev.slice(0, -1)); } return; }
+    if (e.key === 'Backspace' && wordBuffer) { e.preventDefault(); setWordBuffer(prev => prev.slice(0, -1)); return; }
     if (e.key === ' ' || e.key === 'Enter') {
       if (wordBuffer) {
         e.preventDefault();
         const t = transliterateWord(wordBuffer, sourceLang);
-        const start = el.selectionStart;
-        const end = el.selectionEnd;
+        const start = e.currentTarget.selectionStart;
+        const end = e.currentTarget.selectionEnd;
         const newVal = inputText.substring(0, start) + t + (e.key === ' ' ? ' ' : '\n') + inputText.substring(end);
         setInputText(newVal);
-        setInputLatinBuffer(prev => (prev + " " + wordBuffer).trim());
         setWordBuffer('');
-        setTimeout(() => { if (el) { el.selectionStart = el.selectionEnd = start + t.length + 1; el.focus(); } }, 0);
       }
       return; 
     }
@@ -274,287 +241,233 @@ const App: React.FC = () => {
 
   const groupedLessons = useMemo(() => {
     if (!lessonsData) return {};
-    const lessonsToProcess = moduleStatus.isPro 
-      ? lessonsData.lessons 
-      : lessonsData.lessons.slice(0, 20);
-
-    return lessonsToProcess.reduce((acc: any, lesson) => {
-      const cat = lesson.note || 'Vocabulary';
-      if (!acc[cat]) acc[cat] = [];
-      acc[cat].push(lesson);
-      return acc;
-    }, {});
+    const groups: any = {};
+    const lessonsToDisplay = moduleStatus.isPro ? lessonsData.lessons : lessonsData.lessons.slice(0, 20);
+    lessonsToDisplay.forEach((lesson) => {
+        const cat = lesson.note || 'Vocabulary Core';
+        if (!groups[cat]) groups[cat] = [];
+        groups[cat].push(lesson);
+    });
+    return groups;
   }, [lessonsData, moduleStatus.isPro]);
 
   const currentModuleName = `${getLangName(sourceLang)} → ${getLangName(targetLang)}`;
-
-  const handleOpenSubscribe = () => {
-    if (userProfile?.isAuthenticated) setShowSubModal(true);
-    else setShowAuthModal(true);
-  };
-
-  if (isInitialLoading) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center">
-         <div className="bg-[#1d4683] p-5 rounded-3xl animate-bounce mb-6"><BookOpen className="text-white w-12 h-12" /></div>
-         <h1 className="text-white text-2xl font-black mb-2 uppercase">Learnages</h1>
-         <div className="flex items-center gap-2 text-indigo-300 font-bold text-sm"><Loader2 className="animate-spin" size={16} /> Syncing Matrix...</div>
-      </div>
-    );
-  }
+  const isCurrentlyOverLimit = (moduleStatus.usageChars + inputText.length) > moduleStatus.limitChars;
 
   return (
-    <div className={`min-h-screen bg-slate-50 flex flex-col transition-all duration-500 ${moduleStatus.isPro ? 'premium-gold' : ''}`}>
-      <AuthModal isOpen={showAuthModal} onClose={() => { setShowAuthModal(false); setIsSubscribePending(false); }} onSuccess={() => { setShowAuthModal(false); syncUser(); }} />
-      <SubscriptionModal isOpen={showSubModal} moduleName={currentModuleName} onClose={() => setShowSubModal(false)} onSubscribe={async (d, p) => { await userService.subscribeToModule(sourceLang, targetLang, d, p); syncUser(true); }} />
-      <ProfileModal 
-        isOpen={showProfileModal} 
-        user={userProfile} 
-        onClose={() => setShowProfileModal(false)} 
-        onLogout={() => userService.logoutUser()} 
-        onOpenAuth={() => { setShowProfileModal(false); setShowAuthModal(true); }}
-      />
-      <SupportModal 
-        isOpen={showSupportModal} 
-        onClose={() => setShowSupportModal(false)} 
-        onOpenAuth={() => { setShowSupportModal(false); setShowAuthModal(true); }}
-      />
-      
-      {showAdminDashboard && userProfile && (
-        <AdminDashboard currentUserRole={userProfile.role} onBack={() => setShowAdminDashboard(false)} />
-      )}
-
-      {selectedPhrase && <PhraseDetailModal phrase={selectedPhrase} targetLang={targetLang} onClose={() => setSelectedPhrase(null)} />}
-
-      <Navbar user={userProfile} activeTab={activeTab as any} onTabChange={(t) => setActiveTab(t as any)} isPro={moduleStatus.isPro} onOpenAuth={() => setShowAuthModal(true)} onOpenProfile={() => setShowProfileModal(true)} onOpenSupport={() => setShowSupportModal(true)} onOpenSubscribe={handleOpenSubscribe} onOpenAdmin={() => setShowAdminDashboard(true)} />
-
-      <button 
-        onClick={() => setShowSupportModal(true)}
-        className="fixed bottom-6 right-6 z-[55] p-4 bg-[#1d4683] text-white rounded-full shadow-2xl hover:bg-black hover:scale-110 active:scale-95 transition-all group flex items-center gap-2"
-        title="Support Center"
-      >
-        <Headphones size={24} />
-        <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 whitespace-nowrap font-black text-[10px] uppercase">Contact Support</span>
-      </button>
-
-      {newVersionAvailable && (
-        <div className="bg-indigo-600 text-white px-4 py-2 flex items-center justify-center gap-4 text-xs font-bold animate-in slide-in-from-top duration-300 z-50">
-          <span>New version available</span>
-          <button onClick={handleVersionRefresh} className="bg-white text-indigo-600 px-3 py-1 rounded-lg hover:bg-indigo-50 transition-colors uppercase text-[10px] font-black shadow-sm">Refresh</button>
-        </div>
-      )}
+    <div className={`min-h-screen bg-[#f8fafc] flex flex-col transition-all duration-500 ${moduleStatus.isPro ? 'premium-gold' : ''}`}>
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} onSuccess={() => { setShowAuthModal(false); syncUser(); }} />
+      <SubscriptionModal isOpen={showSubModal} moduleName={currentModuleName} onClose={() => setShowSubModal(false)} onSubscribe={async (d, p) => { await userService.subscribeToModule(sourceLang, targetLang, d, p); syncUser(); }} />
+      <ProfileModal isOpen={showProfileModal} user={userProfile} onClose={() => setShowProfileModal(false)} onLogout={() => userService.logoutUser()} onOpenAuth={() => setShowAuthModal(true)} onOpenSubscribe={() => setShowSubModal(true)} />
+      <SupportModal isOpen={showSupportModal} onClose={() => setShowSupportModal(false)} onOpenAuth={() => setShowAuthModal(true)} />
+      {selectedPhrase && <PhraseDetailModal phrase={selectedPhrase} targetLang={targetLang} sourceLang={sourceLang} onClose={() => setSelectedPhrase(null)} />}
+      <Navbar user={userProfile} activeTab={activeTab as any} onTabChange={(t) => setActiveTab(t as any)} isPro={moduleStatus.isPro} onOpenAuth={() => setShowAuthModal(true)} onOpenProfile={() => setShowProfileModal(true)} onOpenSupport={() => setShowSupportModal(true)} onOpenSubscribe={() => setShowSubModal(true)} onOpenAdmin={() => setShowAdminDashboard(true)} />
 
       <main className="flex-1 container mx-auto px-4 py-8 max-w-7xl">
-        <div className="mb-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="mb-12 grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-4">
-                <div className="bg-white p-1.5 rounded-2xl shadow-sm border border-slate-200 flex gap-1">
-                  {['Learn Kannada', 'From Kannada', 'Global Pair'].map((m, i) => (
-                    <button key={m} onClick={() => setAppMode(i === 0 ? 'indian_kannadiga' : i === 1 ? 'kannadiga_indian' : 'global_indian')} className={`flex-1 py-3 px-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${((i===0&&appMode==='indian_kannadiga')||(i===1&&appMode==='kannadiga_indian')||(i===2&&appMode==='global_indian')) ? (moduleStatus.isPro ? 'accent-button shadow-md' : 'bg-[#1d4683] text-white shadow-md') : 'text-slate-600 hover:bg-slate-50'}`}>{m}</button>
-                  ))}
-                </div>
-                <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex items-center gap-4">
-                  <div className="flex-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Language I know</label><select disabled={appMode === 'kannadiga_indian'} value={sourceLang} onChange={e => setSourceLang(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-800 font-bold outline-none disabled:opacity-60">{LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}</select></div>
-                  <button disabled={appMode !== 'global_indian'} onClick={() => { const s = sourceLang; setSourceLang(targetLang); setTargetLang(s); }} className="p-3 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 transition-transform active:rotate-180 disabled:opacity-30 disabled:cursor-not-allowed"><ArrowRightLeft size={20}/></button>
-                  <div className="flex-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Language I want to learn</label><select disabled={appMode === 'indian_kannadiga'} value={targetLang} onChange={e => setTargetLang(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-800 font-bold outline-none disabled:opacity-60">{LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}</select></div>
-                </div>
-            </div>
-            <div className={`p-6 rounded-3xl shadow-xl flex flex-col justify-center border border-white/10 relative overflow-hidden transition-all duration-700 ${moduleStatus.isPro ? 'bg-premium text-slate-900' : 'bg-[#1d4683] text-white'}`}>
-                <h3 className="text-xl font-black mb-2 flex items-center gap-2"><Sparkles size={18} /> {currentModuleName}</h3>
-                <div className="space-y-3">
-                  <div className="flex justify-between text-[10px] font-black uppercase opacity-60"><span>Status</span><span>{moduleStatus.isPro ? 'Professional Access' : `Trial: ${moduleStatus.usageChars}/${LIMIT_CHARS} chars`}</span></div>
-                  <div className="h-2 bg-black/10 rounded-full overflow-hidden">
-                    <div className={`h-full transition-all duration-1000 ${moduleStatus.isPro ? 'bg-slate-900' : 'bg-blue-400'}`} style={{ width: moduleStatus.isPro ? '100%' : `${(moduleStatus.usageChars/LIMIT_CHARS)*100}%` }} />
+                <div className="bg-white p-5 rounded-[2rem] shadow-sm border border-slate-200 flex items-center gap-4">
+                  <div className="flex-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2 px-1">Source (Fluent)</label>
+                    <select value={sourceLang} onChange={e => setSourceLang(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-slate-800 font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">{LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}</select>
+                  </div>
+                  <button onClick={() => { const s = sourceLang; setSourceLang(targetLang); setTargetLang(s); }} className="mt-6 p-4 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-600 hover:text-white transition-all active:rotate-180 shadow-sm"><ArrowRightLeft size={20}/></button>
+                  <div className="flex-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2 px-1">Target (Learning)</label>
+                    <select value={targetLang} onChange={e => setTargetLang(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-slate-800 font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">{LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}</select>
                   </div>
                 </div>
-                {moduleStatus.isPro && <div className="absolute -right-4 -bottom-4 opacity-10 rotate-12"><Trophy size={100}/></div>}
+            </div>
+            <div className={`p-8 rounded-[2.5rem] shadow-xl flex flex-col justify-center border border-white/10 relative overflow-hidden transition-all duration-700 ${moduleStatus.isPro ? 'bg-premium text-slate-900' : 'bg-[#0f172a] text-white'}`}>
+                <div className="absolute -right-8 -top-8 opacity-10"><Globe2 size={120} /></div>
+                <h3 className="text-xl font-black mb-2 flex items-center gap-2 relative z-10"><Crown size={18} className={moduleStatus.isPro ? 'text-amber-600' : 'text-indigo-400'} /> {currentModuleName}</h3>
+                <div className="flex justify-between text-[10px] font-black uppercase tracking-widest opacity-60 relative z-10">
+                  <span>{moduleStatus.isPro ? 'Standard Pro Deck' : `Syllabus Progress: ${moduleStatus.usageChars}/${LIMIT_CHARS} chars`}</span>
+                </div>
             </div>
         </div>
 
         {activeTab === 'translate' && (
-           <div className="space-y-16">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-                  <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col h-[480px] relative">
-                      <div className="px-8 py-3 bg-slate-50 dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700 flex items-center gap-3 shrink-0">
-                         <HelpCircle size={16} className="text-[#1d4683] shrink-0" />
-                         <p className="text-[10px] font-bold text-slate-500 leading-tight">
-                            <b>Laptop Mode:</b> Phonetic typing (e.g. "namaste"). <b>Mobile Mode:</b> Turn OFF Smart Typing to use your phone's native keyboard language.
-                         </p>
-                      </div>
-
-                      {sourceLang !== 'en' && wordBuffer && (
-                        <div className="px-8 py-3 bg-[#1d4683] text-white flex justify-between items-center shrink-0 z-20 animate-in slide-in-from-top-2">
-                           <div className="font-mono font-bold text-lg">{wordBuffer} → {transliterateWord(wordBuffer, sourceLang)}</div>
-                           <div className="text-[9px] font-black uppercase bg-white/20 px-2 py-1 rounded-lg">Space to align</div>
-                        </div>
-                      )}
-
-                      <div className="flex-1 p-8 overflow-y-auto bg-transparent">
-                        <textarea 
-                          ref={textareaRef} 
-                          value={inputText} 
-                          onChange={e => setInputText(e.target.value)} 
-                          onKeyDown={handleInputKeyDown} 
-                          placeholder={smartTypingMode ? "Type sounds (e.g. namaste)..." : "Use your system keyboard..."} 
-                          className="w-full h-full focus:outline-none resize-none text-2xl font-bold placeholder:text-slate-300 dark:placeholder:text-slate-500 text-slate-900 dark:text-white bg-transparent" 
-                        />
+           <div className="space-y-24 animate-in fade-in duration-700">
+              {/* 🖊️ TRANSLATOR COMPONENT */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-start">
+                  <div className="bg-white rounded-[3rem] shadow-2xl border border-slate-200 overflow-hidden flex flex-col h-[520px] relative transition-all hover:border-indigo-100">
+                      {sourceLang !== 'en' && wordBuffer && <div className="px-8 py-3 bg-indigo-600 text-white flex justify-between items-center shrink-0 z-20"><div className="font-mono font-bold text-lg uppercase tracking-widest">{wordBuffer} <span className="mx-2 opacity-50">→</span> {transliterateWord(wordBuffer, sourceLang)}</div></div>}
+                      <div className="flex-1 p-10 overflow-y-auto">
+                        <textarea ref={textareaRef} value={inputText} onChange={e => setInputText(e.target.value)} onKeyDown={handleInputKeyDown} placeholder="Enter a sentence to build..." className="w-full h-full focus:outline-none resize-none text-3xl font-bold text-slate-900 placeholder:text-slate-200 bg-transparent leading-relaxed" />
                       </div>
                       
                       {showSuggestions && currentSuggestions.length > 0 && (
-                        <div className="px-8 py-2 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 overflow-x-auto whitespace-nowrap flex gap-2 scrollbar-hide shrink-0 z-10 transition-all">
+                        <div className="px-8 py-3 bg-slate-50 border-t border-slate-100 overflow-x-auto whitespace-nowrap flex gap-3 shrink-0 z-10 custom-scrollbar">
                           {currentSuggestions.map((s, idx) => (
-                            <button 
-                              key={idx} 
-                              onClick={() => insertTextAtCursor(s.source_native, s.source_transliteration)}
-                              className="px-4 py-1.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-black text-[#1d4683] dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-slate-600 transition-all active:scale-95 flex-shrink-0"
-                            >
-                              {s.source_native}
-                            </button>
+                            <button key={idx} onClick={() => insertTextAtCursor(s.source_native, s.source_transliteration)} className="px-5 py-2 bg-white border border-slate-200 rounded-2xl text-[11px] font-black text-indigo-700 hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-all flex-shrink-0 shadow-sm uppercase tracking-wider">{s.source_native}</button>
                           ))}
                         </div>
                       )}
 
-                      <div className="px-8 py-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex flex-wrap gap-4 justify-between items-center shrink-0 z-20">
-                          <div className="flex items-center gap-3">
-                             <AudioPlayer text={inputText} langCode={sourceLang} size="sm" />
-                             <div className="flex items-center gap-1.5 px-2 border-l border-slate-200 dark:border-slate-700">
-                                <button 
-                                  onClick={() => setSmartTypingMode(!smartTypingMode)} 
-                                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all font-black text-[10px] uppercase border shadow-sm ${smartTypingMode ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white dark:bg-slate-800 text-slate-400 border-slate-200'}`}
-                                >
-                                  <Keyboard size={14}/> {smartTypingMode ? "Phonetic ON" : "Phonetic OFF"}
-                                </button>
-                                <button 
-                                  onClick={() => setShowSuggestions(!showSuggestions)}
-                                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all font-black text-[10px] uppercase border shadow-sm ${showSuggestions ? 'bg-green-600 text-white border-green-700' : 'bg-white dark:bg-slate-800 text-slate-400 border-slate-200'}`}
-                                >
-                                  <Sparkle size={14}/> {showSuggestions ? "Suggestions ON" : "Suggestions OFF"}
-                                </button>
-                             </div>
+                      <div className="px-10 py-6 border-t bg-slate-50 flex justify-between items-center shrink-0">
+                          <button onClick={() => setSmartTypingMode(!smartTypingMode)} className={`flex items-center gap-2 px-4 py-2 rounded-2xl font-black text-[10px] uppercase border shadow-sm transition-all ${smartTypingMode ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white text-slate-400 border-slate-200'}`}><Keyboard size={14}/> Phonetic {smartTypingMode ? "ON" : "OFF"}</button>
+                          <div className="flex items-center gap-4">
+                            {isTranslating ? (
+                                <button onClick={cancelTranslation} className="px-8 py-4 bg-red-50 text-red-600 rounded-[2rem] font-black text-xs uppercase flex items-center gap-2 border border-red-100 shadow-sm hover:bg-red-100 transition-all"><X size={16}/> Stop</button>
+                            ) : (moduleStatus.usageChars >= LIMIT_CHARS || isCurrentlyOverLimit) && !moduleStatus.isPro ? (
+                                <button onClick={() => userProfile?.isAuthenticated ? setShowSubModal(true) : setShowAuthModal(true)} className="px-10 py-4 bg-indigo-600 text-white rounded-[2rem] font-black text-xs uppercase flex items-center gap-3 shadow-xl active:scale-95 transition-all animate-bounce">Unlock Curriculum</button>
+                            ) : (
+                                <button onClick={() => handleTranslate()} disabled={isTranslating} className="px-10 py-4 bg-[#0f172a] text-white rounded-[2rem] font-black text-xs uppercase flex items-center gap-3 shadow-xl active:scale-95 transition-all group">Build Entry <Zap size={16} className="text-indigo-400 group-hover:animate-pulse"/></button>
+                            )}
                           </div>
-                          <button 
-                            onClick={() => handleTranslate()} 
-                            disabled={isTranslating} 
-                            className={`px-8 py-3 rounded-full font-black text-xs uppercase flex items-center gap-2 shadow-xl active:scale-95 transition-all ${moduleStatus.isPro ? 'accent-button' : 'bg-[#1d4683] text-white'}`}
-                          >
-                            {isTranslating ? <Loader2 className="animate-spin" size={14}/> : <Zap size={14}/>} Transliterate
-                          </button>
                       </div>
                   </div>
 
-                  <div className="min-h-[400px] flex flex-col justify-center">
-                      {result && !isTranslating ? (
-                         <div className="bg-white rounded-[2.5rem] shadow-xl border border-slate-200 p-10 space-y-8 animate-in fade-in slide-in-from-right-8 duration-500">
-                            <div className="flex justify-between items-start">
-                               <div className="flex-1">
-                                  <span className="text-[10px] font-black px-3 py-1 rounded-full uppercase mb-3 inline-block bg-green-50 text-green-600 border border-green-100">Linguistic Matrix Match</span>
-                                  <p className="text-4xl text-slate-900 font-black leading-tight tracking-tight">{result.originalText}</p>
+                  <div className="min-h-[520px] flex flex-col justify-center">
+                      {isTranslating ? (
+                        <div className="text-center p-12 space-y-6">
+                           <div className="relative inline-block">
+                              <Loader2 className="animate-spin text-indigo-600 relative z-10" size={64} />
+                              <div className="absolute inset-0 bg-indigo-100 rounded-full blur-2xl opacity-50 animate-pulse"></div>
+                           </div>
+                           <p className="text-indigo-900 font-black uppercase text-sm tracking-[0.3em]">Decoding Linguistic Matrix...</p>
+                        </div>
+                      ) : result ? (
+                         <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
+                            <div className="bg-white rounded-[3.5rem] shadow-2xl border border-slate-100 p-12 space-y-10 text-center relative overflow-hidden group">
+                               <div className="absolute -left-10 -top-10 opacity-5 group-hover:opacity-10 transition-opacity"><MessageCircle size={200} /></div>
+                               <div className="space-y-2 relative z-10">
+                                 <p className="text-[10px] font-black uppercase tracking-[0.5em] text-slate-300">Meaning</p>
+                                 <p className="text-4xl sm:text-5xl text-slate-900 font-indic font-black leading-tight">{result.originalText}</p>
                                </div>
-                               <div className="flex flex-col gap-2">
-                                  <button onClick={() => setVerified(true)} className={`p-4 rounded-2xl border transition-all ${verified ? 'bg-green-500 text-white border-green-500 shadow-lg' : 'bg-slate-50 text-slate-400 border-slate-100 hover:bg-indigo-50 hover:text-indigo-600'}`}>
-                                    {verified ? <CheckCircle2 size={24}/> : <ThumbsUp size={24}/>}
-                                  </button>
-                                  <button className="p-4 bg-slate-50 text-slate-400 rounded-2xl border border-slate-100 hover:bg-slate-100 transition-colors"><Share2 size={20}/></button>
-                               </div>
-                            </div>
-                            <div className={`p-10 rounded-[2.5rem] shadow-2xl relative overflow-hidden transition-all duration-700 ${moduleStatus.isPro ? 'bg-premium text-slate-900' : 'bg-[#1d4683] text-white'}`}>
-                               <p className="text-5xl font-indic font-black mb-6 leading-tight drop-shadow-sm">{result.pronunciationSourceScript}</p>
-                               <div className="flex items-center gap-4">
-                                  <AudioPlayer text={result.translatedText} langCode={targetLang} />
-                                  <span className="text-xs uppercase font-black opacity-60 tracking-[0.2em]">{result.translatedText}</span>
+                               
+                               <div className={`p-12 rounded-[3rem] shadow-2xl ${moduleStatus.isPro ? 'bg-premium text-slate-900' : 'bg-[#0f172a] text-white'} flex flex-col items-center space-y-8 transition-colors duration-500`}>
+                                  <div className="space-y-4 w-full">
+                                    <p className="text-[10px] font-black uppercase tracking-[0.4em] opacity-40">Phonetic Sound</p>
+                                    <div className="flex flex-col items-center gap-4">
+                                      {(result.pronunciationSourceScript || '').split('/').map((part, i) => (
+                                        <p key={i} className="text-5xl sm:text-6xl lg:text-7xl font-indic font-black leading-tight drop-shadow-xl select-all">
+                                          {part.trim()}
+                                        </p>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="w-full h-px bg-white/5" />
+                                  
+                                  <div className="space-y-3 opacity-60">
+                                    <p className="text-[9px] font-black uppercase tracking-widest">Target Script</p>
+                                    <p className="text-2xl font-indic font-bold tracking-wide">{result.translatedText}</p>
+                                  </div>
+
+                                  <div className="flex items-center justify-center gap-10 pt-4">
+                                    <div className="scale-[2.2]"><AudioPlayer text={result.translatedText.split('/')[0].trim()} langCode={targetLang} /></div>
+                                    <div className="h-10 w-px bg-white/10" />
+                                    <span className="text-[11px] uppercase font-black opacity-30 tracking-[0.3em] font-mono">{result.pronunciationLatin}</span>
+                                  </div>
                                </div>
                             </div>
                          </div>
                       ) : (
-                         <div className="text-center p-12 bg-white/50 rounded-[3rem] border-2 border-dashed border-slate-200">
-                            <MousePointer2 className="mx-auto mb-4 text-slate-200" size={48} />
-                            <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Waiting for sound input...</p>
-                         </div>
+                         <div className="text-center p-16 bg-white/40 rounded-[4rem] border-4 border-dotted border-slate-200 flex flex-col items-center gap-6"><MousePointer2 className="text-slate-200" size={80} /><p className="text-slate-400 font-black uppercase text-xs tracking-[0.3em]">Construct a Sound Bridge to Start</p></div>
                       )}
                   </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-10 border-t border-slate-100">
-                 <div className="bg-[#1d4683] text-white p-8 rounded-[2.5rem] shadow-xl flex flex-col justify-between">
-                    <div>
-                       <h3 className="text-2xl font-black mb-2 uppercase tracking-tighter">Need Technical Help?</h3>
-                       <p className="text-blue-100 text-sm font-bold opacity-80">Our support team is available via WhatsApp or our integrated ticket system.</p>
-                    </div>
-                    <div className="mt-8 flex gap-3">
-                       <a href={`https://wa.me/${SUPPORT_WHATSAPP}`} target="_blank" rel="noreferrer" className="flex-1 bg-green-500 hover:bg-green-600 text-white p-4 rounded-2xl flex items-center justify-center gap-2 font-black text-xs uppercase transition-all shadow-md">
-                          <MessageCircle size={18}/> WhatsApp
-                       </a>
-                       <button onClick={() => setShowSupportModal(true)} className="flex-1 bg-white/10 hover:bg-white/20 text-white p-4 rounded-2xl flex items-center justify-center gap-2 font-black text-xs uppercase transition-all border border-white/10">
-                          <FileText size={18}/> Raise Ticket
-                       </button>
-                    </div>
-                 </div>
-                 <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col justify-between">
-                    <div>
-                       <h3 className="text-2xl font-black mb-2 text-[#1d4683] uppercase tracking-tighter">Matrix Verified</h3>
-                       <p className="text-slate-500 text-sm font-bold">Linguistic Matrix connects 20+ languages using a universal concept bridge.</p>
-                    </div>
-                    <div className="mt-8 flex items-center gap-4">
-                       <div className="flex -space-x-3">
-                          {LANGUAGES.slice(0, 5).map(l => (
-                             <div key={l.code} className="w-10 h-10 rounded-full border-2 border-white bg-slate-100 flex items-center justify-center text-[10px] font-black text-slate-400 uppercase">{l.code}</div>
-                          ))}
-                       </div>
-                       <span className="text-xs font-black text-slate-400 uppercase">+15 More</span>
-                    </div>
-                 </div>
-              </div>
-
-              <div className="space-y-12 pt-10">
-                <div className="flex items-center gap-3 px-4">
-                   <Library className="text-[#1d4683]" size={28} />
-                   <h2 className="text-3xl font-black text-slate-800 uppercase tracking-tighter">Knowledge Library</h2>
+              {/* 📚 KNOWLEDGE DECK (Redesigned as structured Curriculum) */}
+              <div className="space-y-16 pt-10">
+                <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6 border-b-4 border-slate-100 pb-8 px-2">
+                   <div className="space-y-3">
+                      <div className="flex items-center gap-3">
+                         <div className="p-3 bg-[#0f172a] text-white rounded-2xl shadow-xl"><Library size={32} /></div>
+                         <h2 className="text-5xl font-black text-slate-900 tracking-tighter uppercase font-display">Syllabus</h2>
+                      </div>
+                      <p className="text-slate-400 font-bold text-sm tracking-tight">Structured lessons paired for <b>{getLangName(sourceLang)}</b> speakers learning <b>{getLangName(targetLang)}</b>.</p>
+                   </div>
+                   <div className="flex items-center gap-4">
+                      <div className="text-right hidden sm:block">
+                         <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Verified Content</p>
+                         <p className="text-xs font-bold text-slate-500">Manual Audit: PASS</p>
+                      </div>
+                      <div className="p-4 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100"><CheckCircle2 size={24} /></div>
+                   </div>
                 </div>
 
-                {Object.keys(groupedLessons).length > 0 ? Object.entries(groupedLessons).map(([category, items]: any) => (
-                  <div key={category} className="space-y-6">
-                    <div className="flex items-center gap-4 px-4">
-                        <div className="h-px flex-1 bg-slate-200" />
-                        <span className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 whitespace-nowrap">{category}</span>
-                        <div className="h-px flex-1 bg-slate-200" />
+                {Object.keys(groupedLessons).length > 0 ? Object.entries(groupedLessons).map(([category, items]: any, catIdx) => (
+                  <div key={category} className="space-y-10 lesson-chapter-section group/cat">
+                    {/* Chapter Header */}
+                    <div className="flex items-start gap-5 px-2">
+                        <div className="w-16 h-16 rounded-[1.5rem] bg-white border border-slate-200 shadow-sm flex items-center justify-center text-slate-400 group-hover/cat:bg-indigo-600 group-hover/cat:text-white group-hover/cat:border-indigo-600 transition-all duration-500">
+                           {CATEGORY_ICONS[category] || <BookOpen size={24} />}
+                        </div>
+                        <div className="pt-1">
+                           <div className="flex items-center gap-3 mb-1">
+                              <span className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em]">Chapter {catIdx + 1}</span>
+                              <div className="h-px w-10 bg-slate-200" />
+                           </div>
+                           <h3 className="text-3xl font-black text-slate-800 uppercase font-display tracking-tight">{category}</h3>
+                        </div>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+
+                    {/* Lesson Curriculum List */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 px-2">
                       {items.map((lesson: any, idx: number) => (
-                        <div key={idx} onClick={() => setSelectedPhrase(lesson)} className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm hover:shadow-xl hover:scale-[1.02] transition-all cursor-pointer group relative overflow-hidden">
-                          <div className="flex justify-between items-start mb-4">
-                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 group-hover:text-indigo-600 transition-colors">Core Asset</span>
-                            {lesson.is_custom && <div className="bg-green-100 text-green-700 p-1.5 rounded-lg"><Check size={12} strokeWidth={4} /></div>}
+                        <div 
+                          key={idx} 
+                          onClick={() => setSelectedPhrase(lesson)} 
+                          className="lesson-chapter-card bg-white rounded-[2.5rem] border border-slate-200 p-2 flex flex-col sm:flex-row items-stretch cursor-pointer overflow-hidden group"
+                        >
+                          {/* Left Visual: Sound Bridge Focus */}
+                          <div className={`sm:w-1/2 rounded-[2rem] p-8 flex flex-col items-center justify-center text-center transition-colors duration-500 ${moduleStatus.isPro ? 'bg-premium text-slate-900' : 'bg-slate-50 text-indigo-900 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                             {lesson.is_custom && (
+                               <div className="absolute top-6 left-6 flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500 text-white rounded-full text-[8px] font-black uppercase tracking-wider shadow-lg">
+                                  <Sparkle size={10} fill="currentColor"/> Matrix Discovery
+                               </div>
+                             )}
+                             <p className="text-[9px] font-black uppercase tracking-[0.3em] mb-4 opacity-50">Speak as</p>
+                             <p className="text-3xl sm:text-4xl font-indic font-black leading-tight drop-shadow-sm break-words">
+                               {lesson.target_in_source_script}
+                             </p>
                           </div>
-                          <p className="text-xl font-black text-slate-800 mb-1 leading-tight">{lesson.source_native}</p>
-                          <p className="text-xs text-slate-400 font-bold mb-4 italic truncate">"{lesson.meaning_english}"</p>
-                          <div className={`p-4 rounded-2xl transition-all duration-500 ${moduleStatus.isPro ? 'bg-premium text-slate-900' : 'bg-slate-50 text-[#1d4683]'}`}>
-                             <p className="text-2xl font-indic font-black truncate">{lesson.target_in_source_script}</p>
+
+                          {/* Right Meta: Meaning & Breakdown */}
+                          <div className="flex-1 p-8 flex flex-col justify-center space-y-6">
+                             <div className="space-y-1">
+                                <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Meaning</p>
+                                <p className="text-xl font-indic font-black text-slate-800 group-hover:text-indigo-600 transition-colors">
+                                  {lesson.source_native}
+                                </p>
+                             </div>
+                             
+                             <div className="flex items-center justify-between">
+                                <div className="space-y-1">
+                                   <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Target Script</p>
+                                   <p className="text-sm font-indic font-bold text-slate-400">{lesson.target_native}</p>
+                                </div>
+                                <div className="p-3 bg-indigo-50 text-indigo-600 rounded-full group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-sm">
+                                   <AudioPlayer text={lesson.target_native} langCode={targetLang} size="sm" />
+                                </div>
+                             </div>
+
+                             <div className="pt-2 border-t border-slate-50 flex items-center gap-2">
+                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Level 1 Lesson Step</span>
+                             </div>
                           </div>
                         </div>
                       ))}
                     </div>
                   </div>
                 )) : (
-                  <div className="text-center py-20 bg-white rounded-[3rem] border-2 border-dashed border-slate-200">
-                      <Loader2 className="animate-spin mx-auto text-slate-300 mb-4" size={40} />
-                      <p className="text-slate-400 font-black uppercase text-sm tracking-widest">Building Library sections...</p>
-                  </div>
-                )}
-                
-                {!moduleStatus.isPro && (
-                  <div onClick={handleOpenSubscribe} className="bg-slate-900 p-12 rounded-[3rem] border border-slate-800 flex flex-col items-center justify-center text-center space-y-6 shadow-2xl group cursor-pointer relative overflow-hidden">
-                    <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-transparent" />
-                    <Lock size={40} className="text-amber-400 mb-2 relative z-10" />
-                    <h3 className="text-2xl font-black text-white relative z-10">Expand Your Knowledge</h3>
-                    <p className="text-slate-400 font-bold max-w-md relative z-10">Unlock 100+ Professional categories including Travel, Doctor, and Market Conversations.</p>
-                    <button className="bg-amber-400 text-amber-950 font-black px-8 py-3 rounded-full uppercase text-xs relative z-10 shadow-lg">Upgrade Now</button>
+                  <div className="text-center py-32 bg-white rounded-[4rem] border-4 border-dashed border-slate-100 flex flex-col items-center gap-4">
+                      <div className="relative">
+                        <Loader2 className="animate-spin text-slate-200" size={64} />
+                        <BookOpen className="absolute inset-0 m-auto text-slate-200" size={24} />
+                      </div>
+                      <p className="text-slate-300 font-black uppercase text-sm tracking-[0.4em] animate-pulse">Assembling Curriculum...</p>
                   </div>
                 )}
               </div>
            </div>
         )}
-
-        {activeTab === 'chat' && <div className="max-w-4xl mx-auto"><ChatInterface sourceLang={sourceLang} targetLang={targetLang} sourceLangName={getLangName(sourceLang)} targetLangName={getLangName(targetLang)} onLimitReached={() => handleOpenSubscribe()} /></div>}
-        {activeTab === 'quiz' && <div className="max-w-3xl mx-auto"><QuizInterface sourceLang={sourceLang} targetLang={targetLang} sourceLangName={getLangName(sourceLang)} targetLangName={getLangName(targetLang)} onLimitReached={() => handleOpenSubscribe()} /></div>}
+        {activeTab === 'chat' && <div className="max-w-4xl mx-auto"><ChatInterface sourceLang={sourceLang} targetLang={targetLang} sourceLangName={getLangName(sourceLang)} targetLangName={getLangName(targetLang)} onLimitReached={() => setShowSubModal(true)} /></div>}
+        {activeTab === 'quiz' && <div className="max-w-3xl mx-auto"><QuizInterface sourceLangName={getLangName(sourceLang)} targetLangName={getLangName(targetLang)} sourceLang={sourceLang} targetLang={targetLang} onLimitReached={() => setShowSubModal(true)} /></div>}
         {activeTab === 'about' && <AboutSection />}
       </main>
     </div>

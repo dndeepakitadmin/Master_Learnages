@@ -105,7 +105,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onO
                   <MessageSquare size={20} />
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-bold text-slate-800">Chat on WhatsApp</h3>
+                  <h3 className="font-bold text-slate-800">WhatsApp Support</h3>
                   <p className="text-xs text-slate-500">Instant response</p>
                 </div>
                 <ExternalLink size={16} className="text-slate-400" />
@@ -119,7 +119,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onO
                   <Mail size={20} />
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-bold text-slate-800">Email Us</h3>
+                  <h3 className="font-bold text-slate-800">Email Support</h3>
                   <p className="text-xs text-slate-500">Get reply in 24hrs</p>
                 </div>
                 <ExternalLink size={16} className="text-slate-400" />
@@ -142,8 +142,8 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, onO
                   <FileText size={20} />
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-bold text-slate-800">Raise a Complaint</h3>
-                  <p className="text-xs text-slate-500">Trackable ticket system</p>
+                  <h3 className="font-bold text-slate-800">Raise Ticket</h3>
+                  <p className="text-xs text-slate-500">Trackable system</p>
                 </div>
                 <ArrowRight size={16} className="text-slate-400" />
               </button>

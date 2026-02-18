@@ -1,4 +1,3 @@
-
 import { HINDI_MAP } from '../data/transliteration/hi';
 import { KANNADA_MAP } from '../data/transliteration/kn';
 import { MALAYALAM_MAP } from '../data/transliteration/ml';
@@ -43,32 +42,57 @@ const REGISTRY: Record<string, TransliterationMap> = {
 
 /**
  * ⌨️ UNIVERSAL PHONETIC WORD CONVERTER
- * Processes a full English string into Native Script.
- * Fixed: Preserves double consonants like 'nn', 'tt' which are valid sounds.
+ * CASE SENSITIVE: 'T' = Retroflex (ಟ), 't' = Dental (ತ)
  */
 export const transliterateWord = (engWord: string, langCode: string): string => {
+  if (!engWord || typeof engWord !== 'string') return "";
+  if (langCode === 'en') return engWord;
+
+  if (engWord.includes('/')) {
+    return engWord.split('/').map(w => transliterateWord(w.trim(), langCode)).join(' / ');
+  }
+
   const map = REGISTRY[langCode];
-  if (!map || !engWord) return engWord;
+  if (!map || Object.keys(map.consonants).length === 0) return engWord;
+
+  // RECTIFICATION: Do NOT lowercase globally. Distinguish T vs t.
+  let input = engWord.trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, "");
+
+  // Phonetic normalization for vowels (can be lowercase)
+  input = input
+    .replace(/ā/g, 'aa')
+    .replace(/ī/g, 'ii')
+    .replace(/ū/g, 'uu')
+    .replace(/ē/g, 'ee')
+    .replace(/ō/g, 'oo');
 
   let result = "";
   let i = 0;
   let activeConsonant = false;
 
-  // We only clean TRIPLE repetitions which are almost certainly typos (e.g. "aaare" -> "aare")
-  const cleanedWord = engWord.replace(/([a-zA-Z])\1{2,}/gi, '$1$1'); 
-
-  while (i < cleanedWord.length) {
+  while (i < input.length) {
     let matched = false;
     
-    // Try matching longest possible prefix (max 3 chars)
+    // Pass through punctuation and whitespace
+    if (/[ \-_.,!?()।\n\r]/.test(input[i])) {
+      result += input[i];
+      i++;
+      activeConsonant = false;
+      continue;
+    }
+
+    // Attempt matching from longest chunk (3) to shortest (1)
     for (let len = 3; len >= 1; len--) {
-      if (i + len > cleanedWord.length) continue;
+      if (i + len > input.length) continue;
       
-      const sub = cleanedWord.substring(i, i + len);
+      const sub = input.substring(i, i + len);
       
-      // 1. Try Matra match (Vowel following consonant)
+      // 1. Dependent Vowel (Matra) check if we just placed a consonant
       if (activeConsonant && map.halant) {
-        const matra = map.matras[sub] || map.matras[sub.toLowerCase()];
+        // Try lowercase vowel match for matras
+        const matra = map.matras[sub.toLowerCase()];
         if (matra !== undefined) {
           result = result.slice(0, -map.halant.length) + matra;
           i += len;
@@ -78,18 +102,8 @@ export const transliterateWord = (engWord: string, langCode: string): string => 
         }
       }
 
-      // 2. Try Exact Match (Preserves Case for N/L/T/D)
-      const vowelForm = map.vowels[sub];
+      // 2. Exact match (Case-Sensitive for Retroflexes)
       const consForm = map.consonants[sub];
-
-      if (vowelForm) {
-        result += vowelForm;
-        i += len;
-        matched = true;
-        activeConsonant = false;
-        break;
-      }
-
       if (consForm) {
         result += consForm + (map.halant || "");
         i += len;
@@ -98,20 +112,29 @@ export const transliterateWord = (engWord: string, langCode: string): string => 
         break;
       }
 
-      // 3. Fallback to lowercase for Vowels/Matras only
-      const lowerSub = sub.toLowerCase();
-      const lowerVowel = map.vowels[lowerSub];
-      if (lowerVowel) {
-         result += lowerVowel;
-         i += len;
-         matched = true;
-         activeConsonant = false;
-         break;
+      // 3. Independent Vowel check (Case-Insensitive usually)
+      const vowelForm = map.vowels[sub.toLowerCase()];
+      if (vowelForm) {
+        result += vowelForm;
+        i += len;
+        matched = true;
+        activeConsonant = false;
+        break;
+      }
+      
+      // 4. Fallback: Lowercase Consonant check
+      const consFormLower = map.consonants[sub.toLowerCase()];
+      if (consFormLower) {
+        result += consFormLower + (map.halant || "");
+        i += len;
+        matched = true;
+        activeConsonant = !!map.halant;
+        break;
       }
     }
 
     if (!matched) {
-      result += cleanedWord[i];
+      result += input[i];
       i++;
       activeConsonant = false;
     }
@@ -120,5 +143,4 @@ export const transliterateWord = (engWord: string, langCode: string): string => 
   return result;
 };
 
-export const resetEngine = () => {};
 export const isTransliterationSupported = (langCode: string): boolean => !!REGISTRY[langCode];

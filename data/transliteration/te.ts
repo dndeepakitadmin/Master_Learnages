@@ -1,4 +1,3 @@
-
 import { TransliterationMap } from './types';
 
 export const TELUGU_MAP: TransliterationMap = {
@@ -14,8 +13,8 @@ export const TELUGU_MAP: TransliterationMap = {
   consonants: {
     'k': 'క', 'kh': 'ఖ', 'g': 'గ', 'gh': 'ఘ',
     'ch': 'చ', 'chh': 'ఛ', 'j': 'జ', 'jh': 'ఝ',
-    't': 'ట', 'th': 'ఠ', 'd': 'డ', 'dh': 'ఢ',
-    'T': 'త', 'Th': 'థ', 'D': 'ద', 'Dh': 'ధ',
+    't': 'త', 'th': 'థ', 'd': 'ద', 'dh': 'ధ',
+    'T': 'ట', 'Th': 'ఠ', 'D': 'డ', 'Dh': 'ఢ',
     'n': 'న', 'N': 'ణ', 'p': 'ప', 'ph': 'ఫ', 'b': 'బ', 'bh': 'భ', 'm': 'మ',
     'y': 'య', 'r': 'ర', 'l': 'ల', 'v': 'వ', 'sh': 'శ', 'S': 'ష', 's': 'స', 'h': 'హ'
   }

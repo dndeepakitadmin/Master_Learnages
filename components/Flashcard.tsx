@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { WordPair } from '../types';
 import { AudioPlayer } from './AudioPlayer';
@@ -10,34 +9,34 @@ interface FlashcardProps {
 
 export const Flashcard: React.FC<FlashcardProps> = ({ word, targetLang }) => {
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all p-5 flex flex-col items-center text-center space-y-3">
+    <div className="bg-white rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition-all p-8 flex flex-col items-center text-center space-y-6">
       {/* Original Word (From Language - LARGE) */}
-      <div className="w-full pb-3 border-b border-slate-100">
-        <p className="text-slate-400 text-[10px] uppercase tracking-wider font-bold mb-1">Source</p>
-        <p className="text-2xl font-black text-slate-900 leading-tight">{word.original}</p>
+      <div className="w-full pb-6 border-b border-slate-100">
+        <p className="text-slate-400 text-[10px] uppercase tracking-[0.2em] font-black mb-2">Source</p>
+        <p className="text-3xl font-indic font-black text-slate-900 leading-tight">{word.original}</p>
       </div>
 
       {/* Translated Word (To Language - SMALLER) */}
-      <div className="w-full pt-1">
-        <p className="text-indigo-500 text-[10px] uppercase tracking-wider font-bold mb-1">Target</p>
-        <p className="text-[10px] font-bold text-slate-300 leading-tight mb-2">{word.translated}</p>
+      <div className="w-full pt-2">
+        <p className="text-indigo-500 text-[10px] uppercase tracking-[0.2em] font-black mb-2">Target</p>
+        <p className="text-xs font-bold text-slate-300 leading-tight mb-4 font-indic">{word.translated}</p>
         
         {/* Pronunciations (LARGER Bridge) */}
-        <div className="mt-2 space-y-1">
+        <div className="mt-4 space-y-2">
             {word.pronunciationSourceScript && (
-                <p className="text-lg text-[#1d4683] font-black">
+                <p className="text-2xl text-[#1d4683] font-indic font-black">
                     {word.pronunciationSourceScript}
                 </p>
             )}
             {word.pronunciationLatin && (
-                <p className="text-[10px] text-slate-400 font-mono italic">
+                <p className="text-[11px] text-slate-400 font-mono italic opacity-60">
                     {word.pronunciationLatin}
                 </p>
             )}
         </div>
         
         {/* Word Audio */}
-        <div className="flex justify-center mt-4">
+        <div className="flex justify-center mt-8 scale-125">
             <AudioPlayer 
                 text={word.translated} 
                 langCode={targetLang} 

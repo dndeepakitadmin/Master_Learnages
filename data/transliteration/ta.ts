@@ -1,4 +1,3 @@
-
 import { TransliterationMap } from './types';
 
 export const TAMIL_MAP: TransliterationMap = {
@@ -12,7 +11,7 @@ export const TAMIL_MAP: TransliterationMap = {
     'e': 'ெ', 'ee': 'ே', 'ai': 'ை', 'o': 'ொ', 'oo': 'ோ', 'au': 'ௌ'
   },
   consonants: {
-    'k': 'க', 'g': 'க', 'ch': 'ச', 'j': 'ஜ', 't': 'ட', 'th': 'த', 
+    'k': 'க', 'g': 'க', 'ch': 'ச', 'j': 'ஜ', 't': 'ட', 'T': 'ட', 'th': 'த', 
     'n': 'ந', 'p': 'ப', 'b': 'ப', 'm': 'ம', 'y': 'ய', 'r': 'ர', 'l': 'ல', 
     'v': 'வ', 'sh': 'ஷ', 's': 'ஸ', 'h': 'ஹ'
   }

@@ -1,9 +1,9 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   LogOut, X, Phone, Mail, Receipt, Loader2,
   MessageSquare, CreditCard, UserCircle, KeyRound, Check, AlertCircle,
-  Clock, Edit2, Save, Trophy, Eye, EyeOff, FileText
+  Clock, Edit2, Save, Trophy, Eye, EyeOff, FileText, RefreshCw, Zap, ToggleLeft, ToggleRight, Headphones
 } from 'lucide-react';
 
 import { UserProfile, PaymentHistoryItem, SupportTicket } from '../types';
@@ -16,8 +16,8 @@ interface ProfileModalProps {
   user: UserProfile | null;
   onClose: () => void;
   onLogout: () => void;
-  // Added onOpenAuth prop to ProfileModalProps
   onOpenAuth: () => void;
+  onOpenSubscribe: () => void;
 }
 
 export const ProfileModal: React.FC<ProfileModalProps> = ({
@@ -25,8 +25,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   user,
   onClose,
   onLogout,
-  // Destructure onOpenAuth prop
-  onOpenAuth
+  onOpenAuth,
+  onOpenSubscribe
 }) => {
   const [activeTab, setActiveTab] = useState<'info' | 'subscriptions' | 'tickets'>('info');
   const [payments, setPayments] = useState<PaymentHistoryItem[]>([]);
@@ -44,6 +44,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   
   const [msg, setMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [autopayMap, setAutopayMap] = useState<Record<string, boolean>>({});
 
   const usageValues = user?.usage ? (Object.values(user.usage) as number[]) : [];
   const totalUsageCount = usageValues.reduce((a: number, b: number) => a + b, 0);
@@ -61,14 +62,30 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const loadData = async (type: 'sub' | 'tkt') => {
     setLoading(true);
     try {
-      if (type === 'sub') setPayments(await userService.getPaymentHistory());
-      else setTickets(await userService.getTicketHistory());
+      if (type === 'sub') {
+        const history = await userService.getPaymentHistory();
+        setPayments(history);
+      } else {
+        setTickets(await userService.getTicketHistory());
+      }
     } catch (e: any) {
       console.warn("Failed to load profile data:", e?.message || e);
     } finally {
       setLoading(false);
     }
   };
+
+  const sortedPayments = useMemo(() => {
+    const now = Date.now();
+    return [...payments].sort((a, b) => {
+      const aExpired = new Date(a.expiry).getTime() < now;
+      const bExpired = new Date(b.expiry).getTime() < now;
+      // Active modules first
+      if (aExpired !== bExpired) return aExpired ? 1 : -1;
+      // Then by expiry date descending (furthest in future first)
+      return new Date(b.expiry).getTime() - new Date(a.expiry).getTime();
+    });
+  }, [payments]);
 
   const resolveFullModuleName = (key: string) => {
     if (!key) return 'General Access';
@@ -92,6 +109,13 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       setProfileLoading(false);
       setTimeout(() => setMsg(null), 3000);
     }
+  };
+
+  const toggleAutopay = (moduleId: string) => {
+    setAutopayMap(prev => ({
+      ...prev,
+      [moduleId]: !prev[moduleId]
+    }));
   };
 
   const handlePasswordChange = async () => {
@@ -139,12 +163,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 
   if (!isOpen || !user) return null;
 
-  // Robust check for pro status background
   const hasProSub = user.subscriptions && typeof user.subscriptions === 'object' && Object.keys(user.subscriptions).length > 0;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-      {/* Fixed SupportModal: added missing onOpenAuth property */}
       <SupportModal isOpen={showRaiseTicket} onClose={() => setShowRaiseTicket(false)} onOpenAuth={onOpenAuth} />
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md max-h-[85vh] overflow-hidden flex flex-col animate-in zoom-in-95">
@@ -194,18 +216,27 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 
                 <div className={`p-4 rounded-2xl border transition-all ${isEditing ? 'bg-white border-indigo-200 ring-2 ring-indigo-50' : 'bg-slate-50 border-slate-100'} flex items-center gap-4`}>
                   <Phone size={18} className={isEditing ? 'text-indigo-600' : 'text-slate-300'}/>
-                  {isEditing ? <input value={editPhone} onChange={e => setEditPhone(e.target.value)} className="w-full text-sm font-bold bg-transparent outline-none" placeholder="Add Phone"/> : <span className="text-sm font-bold text-slate-700">{user.phone || 'Set Phone'}</span>}
+                  {isEditing ? <input type="tel" value={editPhone} onChange={e => setEditPhone(e.target.value)} className="w-full text-sm font-bold bg-transparent outline-none" placeholder="Add Phone"/> : <span className="text-sm font-bold text-slate-700">{user.phone || 'Set Phone'}</span>}
                 </div>
               </div>
 
               {msg && <div className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 ${msg.type === 'success' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}><AlertCircle size={14}/> {msg.text}</div>}
 
-              <button 
-                onClick={() => { setShowPassChange(!showPassChange); setMsg(null); }} 
-                className="text-xs font-black uppercase text-[#1d4683] flex items-center gap-2 hover:underline"
-              >
-                <KeyRound size={14}/> Update Password
-              </button>
+              <div className="flex flex-col gap-3">
+                <button 
+                  onClick={() => { setShowPassChange(!showPassChange); setMsg(null); }} 
+                  className="text-xs font-black uppercase text-[#1d4683] flex items-center gap-2 hover:underline"
+                >
+                  <KeyRound size={14}/> Update Password
+                </button>
+                
+                <button 
+                  onClick={() => setActiveTab('tickets')} 
+                  className="text-xs font-black uppercase text-[#1d4683] flex items-center gap-2 hover:underline"
+                >
+                  <Headphones size={14}/> Get Support / Raise Ticket
+                </button>
+              </div>
               
               {showPassChange && (
                 <div className="space-y-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 animate-in fade-in slide-in-from-top-2">
@@ -270,37 +301,89 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   <Loader2 className="animate-spin" size={24} />
                   <p className="text-[10px] font-black uppercase">Loading Subscriptions...</p>
                 </div>
-              ) : payments.map(p => (
-                <div key={p.id} className="p-5 border rounded-3xl space-y-3 bg-white shadow-sm border-slate-100">
-                  <div className="flex justify-between items-start">
-                    <h4 className="text-sm font-black text-slate-800">{resolveFullModuleName(p.module)}</h4>
-                    <div className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-[8px] font-black uppercase">Active</div>
+              ) : sortedPayments.map(p => {
+                const expiryTime = new Date(p.expiry).getTime();
+                const now = Date.now();
+                const isExpired = expiryTime < now;
+                const isExpiringSoon = !isExpired && (expiryTime - now) < 86400000;
+                const isAutopay = !!autopayMap[p.id];
+
+                return (
+                  <div key={p.id} className={`p-5 border rounded-3xl space-y-4 bg-white shadow-sm transition-all ${isExpired ? 'opacity-70 border-slate-100' : 'border-slate-200'}`}>
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <h4 className="text-sm font-black text-slate-800">{resolveFullModuleName(p.module)}</h4>
+                        <div className="flex items-center gap-2 mt-1">
+                          {isExpired ? (
+                            <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-[4px] text-[8px] font-black uppercase">Access Expired</span>
+                          ) : isExpiringSoon ? (
+                            <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-[4px] text-[8px] font-black uppercase animate-pulse">Expiring Today</span>
+                          ) : (
+                            <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-[4px] text-[8px] font-black uppercase">Pro Active</span>
+                          )}
+                        </div>
+                      </div>
+                      {(isExpired || isExpiringSoon) && (
+                        <button 
+                          onClick={onOpenSubscribe}
+                          className="bg-indigo-600 text-white p-2.5 rounded-2xl shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all active:scale-95 flex items-center gap-2"
+                        >
+                          <RefreshCw size={14} />
+                          <span className="text-[10px] font-black uppercase pr-1">Renew</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-50">
+                       <div className="flex items-center gap-2 text-[10px] text-slate-400 font-bold">
+                         <Clock size={12}/> 
+                         {isExpired ? 'Access ended on: ' : 'Renewal due on: '} 
+                         {new Date(p.expiry).toLocaleDateString()}
+                       </div>
+                       
+                       {!isExpired && (
+                         <div className="flex items-center gap-3">
+                           <span className="text-[8px] font-black uppercase tracking-widest text-slate-400">Monthly Autopay</span>
+                           <button onClick={() => toggleAutopay(p.id)} className="transition-transform active:scale-90">
+                              {isAutopay ? <ToggleRight className="text-indigo-600" size={28} /> : <ToggleLeft className="text-slate-200" size={28} />}
+                           </button>
+                         </div>
+                       )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 text-[10px] text-slate-400 font-bold"><Clock size={12}/> Valid: {new Date(p.expiry).toLocaleDateString()}</div>
-                </div>
-              ))}
+                );
+              })}
               {!loading && payments.length === 0 && <div className="text-center py-10 opacity-30 font-black text-xs uppercase tracking-widest"><CreditCard size={32} className="mx-auto mb-2"/> No active modules</div>}
             </div>
           )}
 
           {activeTab === 'tickets' && (
-            <div className="space-y-3">
-              {loading ? (
-                <div className="flex flex-col items-center justify-center py-10 text-slate-400 gap-3">
-                  <Loader2 className="animate-spin" size={24} />
-                  <p className="text-[10px] font-black uppercase">Loading Tickets...</p>
-                </div>
-              ) : tickets.map(t => (
-                <div key={t.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                  <div className="flex justify-between text-[10px] font-black text-[#1d4683] uppercase mb-2">
-                    <span>Ref: {t.ticket_no || t.id.slice(0,8)}</span>
-                    <span className={t.status === 'resolved' ? 'text-green-600' : 'text-amber-600'}>{t.status}</span>
+            <div className="space-y-4">
+              <button 
+                onClick={() => setShowRaiseTicket(true)}
+                className="w-full py-4 bg-indigo-600 text-white font-black uppercase text-xs rounded-2xl flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all"
+              >
+                <FileText size={18} /> Raise a Support Ticket
+              </button>
+
+              <div className="space-y-3">
+                {loading ? (
+                  <div className="flex flex-col items-center justify-center py-10 text-slate-400 gap-3">
+                    <Loader2 className="animate-spin" size={24} />
+                    <p className="text-[10px] font-black uppercase">Loading Tickets...</p>
                   </div>
-                  <p className="text-xs text-slate-700 font-medium">{t.message}</p>
-                  <p className="text-[8px] text-slate-400 mt-2">{t.created_at ? new Date(t.created_at).toLocaleString() : ''}</p>
-                </div>
-              ))}
-              {!loading && tickets.length === 0 && <div className="text-center py-10 opacity-30 font-black text-xs uppercase tracking-widest"><MessageSquare size={32} className="mx-auto mb-2"/> No inquiry logs</div>}
+                ) : tickets.map(t => (
+                  <div key={t.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                    <div className="flex justify-between text-[10px] font-black text-[#1d4683] uppercase mb-2">
+                      <span>Ref: {t.ticket_no || t.id.slice(0,8)}</span>
+                      <span className={t.status === 'resolved' ? 'text-green-600' : 'text-amber-600'}>{t.status}</span>
+                    </div>
+                    <p className="text-xs text-slate-700 font-medium">{t.message}</p>
+                    <p className="text-[8px] text-slate-400 mt-2">{t.created_at ? new Date(t.created_at).toLocaleString() : ''}</p>
+                  </div>
+                ))}
+                {!loading && tickets.length === 0 && <div className="text-center py-10 opacity-30 font-black text-xs uppercase tracking-widest"><MessageSquare size={32} className="mx-auto mb-2"/> No inquiry logs</div>}
+              </div>
             </div>
           )}
         </div>

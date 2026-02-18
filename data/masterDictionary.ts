@@ -2,7 +2,7 @@ import { MasterPhrase } from '../types';
 
 /**
  * 📚 UNIVERSAL MASTER FALLBACK DICTIONARY
- * Provides foundational data for IDs 1-84 for all 20 languages.
+ * Provides foundational data for IDs 1-85 for all 20 languages.
  */
 export const MASTER_DICTIONARY: MasterPhrase[] = [
   /* ───────────── 1-10: TALKING TO A FRIEND & IN THE MARKET ───────────── */
@@ -77,11 +77,11 @@ export const MASTER_DICTIONARY: MasterPhrase[] = [
   { id: 65, category: "Pronouns", en_meaning: "From them", langs: { en: { native: "From them", latin: "From them", phonetic_mode: "native" } } },
   { id: 66, category: "Pronouns", en_meaning: "They only", langs: { en: { native: "They only", latin: "They only", phonetic_mode: "native" } } },
 
-  /* ───────────── 67-70: IN THE MARKET ───────────── */
-  { id: 67, category: "In the Market", en_meaning: "It / This", langs: { en: { native: "It", latin: "It", phonetic_mode: "native" } } },
-  { id: 68, category: "In the Market", en_meaning: "That", langs: { en: { native: "That", latin: "That", phonetic_mode: "native" } } },
-  { id: 69, category: "In the Market", en_meaning: "Here", langs: { en: { native: "Here", latin: "Here", phonetic_mode: "native" } } },
-  { id: 70, category: "In the Market", en_meaning: "There", langs: { en: { native: "There", latin: "There", phonetic_mode: "native" } } },
+  /* ───────────── 67-70: BASICS (CORE) ───────────── */
+  { id: 67, category: "Basics", en_meaning: "It / This", langs: { en: { native: "It / This", latin: "It", phonetic_mode: "native" } } },
+  { id: 68, category: "Basics", en_meaning: "That", langs: { en: { native: "That", latin: "That", phonetic_mode: "native" } } },
+  { id: 69, category: "Basics", en_meaning: "Here", langs: { en: { native: "Here", latin: "Here", phonetic_mode: "native" } } },
+  { id: 70, category: "Basics", en_meaning: "There", langs: { en: { native: "There", latin: "There", phonetic_mode: "native" } } },
 
   /* ───────────── 71-81: VERBS ───────────── */
   { id: 71, category: "Verbs", en_meaning: "To Come", langs: { en: { native: "Come", latin: "Come", phonetic_mode: "native" }, hi: { native: "आना", latin: "Aana", phonetic_mode: "native" }, kn: { native: "ಬಾ / ಬನ್ನಿ", latin: "Ba / Banni", phonetic_mode: "native" }, ar: { native: "تَعَال", latin: "Ta'al", phonetic_mode: "native" } } },
@@ -99,5 +99,8 @@ export const MASTER_DICTIONARY: MasterPhrase[] = [
   /* ───────────── 82-84: TALKING TO A DOCTOR ───────────── */
   { id: 82, category: "Talking to a Doctor", en_meaning: "I feel sick", langs: { en: { native: "I feel sick", latin: "I feel sick", phonetic_mode: "native" }, hi: { native: "मेरी तबीयत ठीक नहीं है", latin: "Meri tabiyat theek nahi hai", phonetic_mode: "native" }, kn: { native: "ನನಗೆ ಹುಷಾರಿಲ್ಲ", latin: "Nanage hushaarithilla", phonetic_mode: "native" } } },
   { id: 83, category: "Talking to a Doctor", en_meaning: "It hurts here", langs: { en: { native: "It hurts here", latin: "It hurts here", phonetic_mode: "native" }, hi: { native: "यहाँ दर्द हो रहा है", latin: "Yahan dard ho raha hai", phonetic_mode: "native" }, kn: { native: "ಇಲ್ಲಿ ನೋವಾಗುತ್ತಿದೆ", latin: "Illi novaaguttide", phonetic_mode: "native" } } },
-  { id: 84, category: "Talking to a Doctor", en_meaning: "I need medicine", langs: { en: { native: "I need medicine", latin: "I need medicine", phonetic_mode: "native" }, hi: { native: "मुझे दवा चाहिए", latin: "Mujhe dava chahiye", phonetic_mode: "native" }, kn: { native: "ನನಗೆ ಔಷಧಿ ಬೇಕು", latin: "Nanage aushadhi beku", phonetic_mode: "native" } } }
+  { id: 84, category: "Talking to a Doctor", en_meaning: "I need medicine", langs: { en: { native: "I need medicine", latin: "I need medicine", phonetic_mode: "native" }, hi: { native: "मुझे दवा चाहिए", latin: "Mujhe dava chahiye", phonetic_mode: "native" }, kn: { native: "ನನಗೆ ಔಷಧಿ ಬೇಕು", latin: "Nanage aushadhi beku", phonetic_mode: "native" } } },
+
+  /* ───────────── 85: CONVERSATION ───────────── */
+  { id: 85, category: "Conversation", en_meaning: "Where is the key?", langs: { en: { native: "Where is the key?", latin: "Where is the key?", phonetic_mode: "native" }, hi: { native: "चाबी कहाँ है?", latin: "Chaabi kahan hai?", phonetic_mode: "native" }, kn: { native: "ಕೀಲಿ ಎಲ್ಲಿದೆ?", latin: "Keeli ellide?", phonetic_mode: "native" } } }
 ];

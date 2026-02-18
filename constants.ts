@@ -1,3 +1,4 @@
+
 import { LanguageOption } from './types.ts';
 
 export const LANGUAGES: LanguageOption[] = [
@@ -65,4 +66,4 @@ export const GLOBAL_ADMIN_EMAILS = [
 
 // 📞 SUPPORT CONTACT DETAILS
 export const SUPPORT_WHATSAPP = '919035887175';
-export const SUPPORT_EMAIL = 'dndeepakit@gmail.com';
+export const SUPPORT_EMAIL = 'support@learnages.in';

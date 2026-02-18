@@ -1,113 +1,88 @@
-import { LessonItem, MasterPhrase } from '../types';
+import { LessonItem, MasterPhrase, MatrixEntry } from '../types';
 import { userService } from '../services/userService';
 import { transliterateWord } from '../services/transliterationService';
-import { MASTER_DICTIONARY } from './masterDictionary'; // Universal fallback
-import { MASTER_DICTIONARY_KN } from './masterDictionary.kn';
-import { MASTER_DICTIONARY_HI } from './masterDictionary.hi';
-import { MASTER_DICTIONARY_EN } from './masterDictionary.en';
-import { MASTER_DICTIONARY_TE } from './masterDictionary.te';
-import { MASTER_DICTIONARY_ML } from './masterDictionary.ml';
-import { MASTER_DICTIONARY_TA } from './masterDictionary.ta';
-import { MASTER_DICTIONARY_MR } from './masterDictionary.mr';
-import { MASTER_DICTIONARY_GU } from './masterDictionary.gu';
-import { MASTER_DICTIONARY_BN } from './masterDictionary.bn';
-import { MASTER_DICTIONARY_PA } from './masterDictionary.pa';
-import { MASTER_DICTIONARY_AS } from './masterDictionary.as';
-import { MASTER_DICTIONARY_OR } from './masterDictionary.or';
-import { MASTER_DICTIONARY_UR } from './masterDictionary.ur';
-import { MASTER_DICTIONARY_ES } from './masterDictionary.es';
-import { MASTER_DICTIONARY_FR } from './masterDictionary.fr';
-import { MASTER_DICTIONARY_DE } from './masterDictionary.de';
-import { MASTER_DICTIONARY_JA } from './masterDictionary.ja';
-import { MASTER_DICTIONARY_KO } from './masterDictionary.ko';
-import { MASTER_DICTIONARY_ZH } from './masterDictionary.zh';
-import { MASTER_DICTIONARY_AR } from './masterDictionary.ar';
+import { MASTER_DICTIONARY } from './masterDictionary';
 
 /**
- * 🗃️ DICTIONARY REGISTRY
- */
-export const DICTIONARY_REGISTRY: Record<string, MasterPhrase[]> = {
-  kn: MASTER_DICTIONARY_KN,
-  hi: MASTER_DICTIONARY_HI,
-  en: MASTER_DICTIONARY_EN,
-  te: MASTER_DICTIONARY_TE,
-  ml: MASTER_DICTIONARY_ML,
-  ta: MASTER_DICTIONARY_TA,
-  mr: MASTER_DICTIONARY_MR,
-  gu: MASTER_DICTIONARY_GU,
-  bn: MASTER_DICTIONARY_BN,
-  pa: MASTER_DICTIONARY_PA,
-  as: MASTER_DICTIONARY_AS,
-  or: MASTER_DICTIONARY_OR,
-  ur: MASTER_DICTIONARY_UR,
-  es: MASTER_DICTIONARY_ES,
-  fr: MASTER_DICTIONARY_FR,
-  de: MASTER_DICTIONARY_DE,
-  ja: MASTER_DICTIONARY_JA,
-  ko: MASTER_DICTIONARY_KO,
-  zh: MASTER_DICTIONARY_ZH,
-  ar: MASTER_DICTIONARY_AR,
-};
-
-const mergedCache: Record<string, MasterPhrase[]> = {};
-
-export const getMergedDictionary = async (langCode: string): Promise<MasterPhrase[]> => {
-  if (mergedCache[langCode]) return mergedCache[langCode];
-
-  const staticData = DICTIONARY_REGISTRY[langCode] || [];
-  const merged = [...staticData];
-
-  MASTER_DICTIONARY.forEach(univ => {
-    if (!merged.find(m => m.id === univ.id)) {
-      merged.push(univ);
-    }
-  });
-
-  const finalResult = merged.sort((a, b) => a.id - b.id);
-  mergedCache[langCode] = finalResult;
-  return finalResult;
-};
-
-/**
- * 🎓 GENERATE LESSON ITEMS (STATIC + DB + MATRIX)
+ * 🎓 THE GLOBAL ENGINE
+ * Pairs languages using Semantic Anchors from the DB.
  */
 export const generateStaticLessons = async (
   sourceCode: string,
   targetCode: string
 ): Promise<LessonItem[]> => {
-  const targetDict = await getMergedDictionary(targetCode);
-  const sourceDict = await getMergedDictionary(sourceCode);
+  
+  // 1. Fetch Cloud Data
+  const cloudDeck = await userService.getGlobalMatrixDeck();
+  
+  // 2. Pair using Semantic Anchor logic
+  const cloudLessons = cloudDeck.map((entry: MatrixEntry): LessonItem | null => {
+    const sData = entry.matrix_data[sourceCode];
+    const tData = entry.matrix_data[targetCode];
 
-  // 1. Core Static Lessons
-  const coreLessons = targetDict.map((targetPhrase) => {
-    const targetData = targetPhrase.langs[targetCode];
-    let sourcePhrase = sourceDict.find(p => p.id === targetPhrase.id);
-    if (!sourcePhrase) sourcePhrase = MASTER_DICTIONARY.find(p => p.id === targetPhrase.id);
-    const sourceData = sourcePhrase?.langs[sourceCode];
+    if (!sData || !tData) return null;
+
+    // 🛡️ RECTIFICATION: Strict Script Bridging
+    let targetBridge = tData.b?.[sourceCode];
+    
+    // Check if bridge is actually Latin text (detecting 'a-z' and symbols common in phonetic strings)
+    const isActuallyLatin = (s: string) => /^[a-z0-9\s.,!?()\-]+$/i.test(s || "");
+    
+    if (sourceCode !== 'en' && (!targetBridge || isActuallyLatin(targetBridge))) {
+       // Force transliteration from the Latin sound field 'l' into the source script
+       targetBridge = transliterateWord(tData.l, sourceCode);
+    }
 
     return {
-      source_native: sourceData?.native || sourcePhrase?.en_meaning || targetPhrase.en_meaning,
-      source_transliteration: sourceData?.latin || "",
-      target_native: targetData?.native || targetPhrase.en_meaning,
-      target_transliteration: targetData?.latin || "",
-      target_in_source_script: targetData?.b?.[sourceCode] || transliterateWord(targetData?.latin || '', sourceCode), 
-      meaning_english: targetPhrase.en_meaning,
-      note: targetPhrase.category,
+      source_native: sData.n,
+      source_transliteration: sData.l,
+      target_native: tData.n,
+      target_transliteration: tData.l,
+      target_in_source_script: targetBridge || tData.l,
+      meaning_english: entry.en_anchor,
+      note: entry.category,
       is_custom: false
     };
-  });
+  }).filter((i): i is LessonItem => i !== null);
 
-  // 2. Custom User Lessons (Legacy Pair Logic)
+  // 3. Fallback to Local Master
+  const fallbackLessons = MASTER_DICTIONARY.map((ph): LessonItem | null => {
+    const sData = ph.langs[sourceCode];
+    const tData = ph.langs[targetCode];
+
+    if (!sData || !tData) return null;
+
+    let targetBridge = tData.b?.[sourceCode];
+    const isActuallyLatin = (s: string) => /^[a-z0-9\s.,!?()\-]+$/i.test(s || "");
+
+    if (sourceCode !== 'en' && (!targetBridge || isActuallyLatin(targetBridge))) {
+       targetBridge = transliterateWord(tData.latin, sourceCode);
+    }
+
+    return {
+      source_native: sData.native,
+      source_transliteration: sData.latin,
+      target_native: tData.native,
+      target_transliteration: tData.latin,
+      target_in_source_script: targetBridge || tData.latin,
+      meaning_english: ph.en_meaning,
+      note: ph.category,
+      is_custom: false
+    };
+  }).filter((i): i is LessonItem => i !== null);
+
+  // 4. Custom User Lessons
   const customLessons = await userService.getUserLessons(sourceCode, targetCode);
 
-  // 3. Shared Global Matrix Entries (New Crowdsourcing Logic)
-  const matrixLessons = await userService.getRecentMatrixEntries(sourceCode, targetCode);
+  // 5. Merge & De-duplicate
+  const combined = [...cloudLessons, ...fallbackLessons, ...customLessons];
+  const seen = new Set();
   
-  // Enhance matrix lessons with local script bridge
-  const enhancedMatrix = matrixLessons.map(l => ({
-    ...l,
-    target_in_source_script: transliterateWord(l.target_transliteration, sourceCode)
-  }));
-
-  return [...coreLessons, ...customLessons, ...enhancedMatrix];
+  return combined.filter(l => {
+    if (!l.source_native) return false;
+    const key = `${l.source_native.toString().toLowerCase().trim()}_${l.meaning_english.toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 };

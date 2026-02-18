@@ -1,10 +1,11 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { TranslationResult, QuizResult, ChatMessage, LessonResponse, MatrixLangData, LessonItem } from '../types.ts';
+import { TranslationResult, QuizResult, ChatMessage, LessonResponse, MatrixLangData, LessonItem, WordPair } from '../types.ts';
 import { cacheService } from './cacheService.ts';
 import { userService } from './userService.ts';
 import { generateStaticLessons } from '../data/staticLessons.ts';
 import { generateLocalQuiz } from './localQuizService.ts';
 import { LANGUAGES } from '../constants.ts';
+import { transliterateWord } from './transliterationService.ts';
 
 const preFixTypos = (text: string): string => {
   return text.replace(/\b(\w+)\b/g, (word) => {
@@ -12,103 +13,51 @@ const preFixTypos = (text: string): string => {
   });
 };
 
+const cleanJson = (text: string) => {
+  return text.replace(/```json\n?|```/g, '').trim();
+};
+
+const CORE_LANGS = ['hi', 'kn', 'en', 'te', 'ml', 'ta', 'mr', 'gu', 'bn', 'ur', 'es', 'fr', 'de', 'ja', 'ko', 'zh', 'ar', 'pa', 'as', 'or'];
+
 /**
  * 🎓 LOCALIZED TUTOR TEMPLATES
- * Map of source language to response templates to avoid English in tutoring.
  */
 const TUTOR_STRINGS: Record<string, any> = {
   hi: {
-    meaning: (w: string, m: string, b: string) => `चुने गए शब्द "${w}" का अर्थ "${m}" है। आप इसे "${b}" पढ़ सकते हैं।`,
+    intro: "चुने गए शब्द",
+    mapping: (w: string, b: string) => `${w} - ${b}`,
+    instruction: "आप इसे",
+    outro: "पढ़ सकते हैं",
     fallback: (w: string, r: string) => `मैं मदद के लिए हूँ! शब्द "${w}" मेरी सूची में नहीं है, लेकिन क्या आप "${r}" का अर्थ जानते हैं?`
   },
   kn: {
-    meaning: (w: string, m: string, b: string) => `ಆಯ್ಕೆ ಮಾಡಿದ ಪದ "${w}" ಇದರ ಅರ್ಥ "${m}". ನೀವು ಇದನ್ನು "${b}" ಎಂದು ಓದಬಹುದು.`,
+    intro: "ಆಯ್ಕೆ ಮಾಡಿದ ಪದಗಳು",
+    mapping: (w: string, b: string) => `${w} - ${b}`,
+    instruction: "ಇದನ್ನು ನೀವು",
+    outro: "ಎಂದು ಓದಬಹುದು",
     fallback: (w: string, r: string) => `ನಾನು ಸಹಾಯ ಮಾಡಲು ಇಲ್ಲಿದ್ದೇನೆ! "${w}" ನನ್ನ ಪಟ್ಟಿಯಲ್ಲಿ ಇಲ್ಲ, ಆದರೆ ನಿಮಗೆ "${r}" ಪದದ ಅರ್ಥ ಗೊತ್ತೇ?`
   },
-  ml: {
-    meaning: (w: string, m: string, b: string) => `തിരഞ്ഞെടുത്ത വാക്കിന്റെ "${w}" അർത്ഥം "${m}" എന്നാണ്. ഇത് "${b}" എന്ന് വായിക്കാം.`,
-    fallback: (w: string, r: string) => `സഹായിക്കാൻ ഞാൻ ഇതാ! "${w}" എന്റെ പക്കലില്ല. നിങ്ങൾക്ക് "${r}" അറിയാമോ?`
-  },
-  ta: {
-    meaning: (w: string, m: string, b: string) => `தேர்ந்தெடுக்கப்பட்ட வார்த்தை "${w}" இன் பொருள் "${m}". இதை நீங்கள் "${b}" என்று படிக்கலாம்.`,
-    fallback: (w: string, r: string) => `நான் உங்களுக்கு உதவ இருக்கிறேன்! "${w}" என் பட்டியலில் இல்லை. உங்களுக்கு "${r}" தெரியுமா?`
-  },
-  te: {
-    meaning: (w: string, m: string, b: string) => `ఎంచుకున్న పదం "${w}" యొక్క అర్థం "${m}". దీనిని మీరు "${b}" అని చదవవచ్చు.`,
-    fallback: (w: string, r: string) => `నేను సహాయం చేయడానికి ఇక్కడ ఉన్నాను! "${w}" నా దగ్గర లేదు. మీకు "${r}" తెలుసా?`
-  },
-  mr: {
-    meaning: (w: string, m: string, b: string) => `निवडलेल्या शब्दाचा "${w}" अर्थ "${m}" असा आहे. आपण हे "${b}" असे वाचू शकता.`,
-    fallback: (w: string, r: string) => `मी मदतीसाठी येथे आहे! "${w}" माझ्याकडे नाही, पण तुम्हाला "${r}" चा अर्थ माहित आहे का?`
-  },
-  gu: {
-    meaning: (w: string, m: string, b: string) => `પસંદ કરેલા શબ્દ "${w}" નો અર્થ "${m}" છે. તમે તેને "${b}" તરીકે વાંચી શકો છો.`,
-    fallback: (w: string, r: string) => `હું મદદ માટે અહીં છું! "${w}" મારી પાસે નથી, પણ શું તમે "${r}" જાણો છો?`
-  },
-  bn: {
-    meaning: (w: string, m: string, b: string) => `নির্বাচিত শব্দ "${w}" এর অর্থ হলো "${m}"। আপনি এটি "${b}" হিসেবে পড়তে পারেন।`,
-    fallback: (w: string, r: string) => `আমি সাহায্যের জন্য আছি! "${w}" আমার তালিকায় নেই, তবে আপনি কি "${r}" এর অর্থ জানেন?`
-  },
-  pa: {
-    meaning: (w: string, m: string, b: string) => `ਚੁਣੇ ਹੋਏ ਸ਼ਬਦ "${w}" ਦਾ ਅਰਥ "${m}" ਹੈ। ਤੁਸੀਂ ਇਸਨੂੰ "${b}" ਪੜ੍ਹ ਸਕਦੇ ਹੋ।`,
-    fallback: (w: string, r: string) => `ਮੈਂ ਮਦਦ ਲਈ ਇੱਥੇ ਹਾਂ! "${w}" ਮੇਰੀ ਸੂਚੀ ਵਿੱਚ ਨਹੀਂ ਹੈ, ਕੀ ਤੁਹਾਨੂੰ "${r}" ਦਾ ਪਤਾ ਹੈ?`
-  },
-  ur: {
-    meaning: (w: string, m: string, b: string) => `منتخب کردہ لفظ "${w}" का मतलब "${m}" ہے۔ آپ اسے "${b}" पढ़ सकते हैं।`,
-    fallback: (w: string, r: string) => `मैं मदद के लिए हाजिर हूँ! शब्द "${w}" मेरी फेहरिस्त में नहीं है, क्या आप "${r}" का मतलब जानते हैं?`
-  },
-  as: {
-    meaning: (w: string, m: string, b: string) => `নিৰ্বাচিত শব্দ "${w}" ৰ অৰ্থ হ'ল "${m}"। আপুনি ইয়াক "${b}" বুলি পঢ়িব পাৰে।`,
-    fallback: (w: string, r: string) => `মই সহায়ৰ বাবে আছোঁ! "${w}" মোৰ ওচৰত নাই, আপুনি "${r}" ৰ অৰ্থ জানে নেকি?`
-  },
-  or: {
-    meaning: (w: string, m: string, b: string) => `ବଛାଯାଇଥିବା ଶବ୍ଦ "${w}" ର ଅର୍ଥ ହେଉଛି "${m}" | ଆପଣ ଏହାକୁ "${b}" ଭାବରେ ପଢିପାରିବେ |`,
-    fallback: (w: string, r: string) => `ମୁଁ ସାହାଯ୍ୟ ପାଇଁ ଅଛି! "${w}" ମୋ ପାଖରେ ନାହିଁ, ଆପଣ "${r}" ଜାଣିଛନ୍ତି କି?`
-  },
-  es: {
-    meaning: (w: string, m: string, b: string) => `El significado de la palabra seleccionada "${w}" es "${m}". Puedes leerlo como "${b}".`,
-    fallback: (w: string, r: string) => `¡Estoy para ayudarte! "${w}" no está en mi mazo. ¿Conoces "${r}"?`
-  },
-  fr: {
-    meaning: (w: string, m: string, b: string) => `La signification du mot "${w}" est "${m}". Vous pouvez le lire comme "${b}".`,
-    fallback: (w: string, r: string) => `Je suis là pour vous aider ! "${w}" n'est pas là. Connaissez-vous "${r}" ?`
-  },
-  de: {
-    meaning: (w: string, m: string, b: string) => `Die Bedeutung von "${w}" ist "${m}". Sie können es als "${b}" lesen.`,
-    fallback: (w: string, r: string) => `Ich bin hier, um zu helfen! "${w}" ist nicht hier. Kennen Sie "${r}"?`
-  },
-  ja: {
-    meaning: (w: string, m: string, b: string) => `選択された単語「${w}」の意味は「${m}」です。「${b}」と読みます。`,
-    fallback: (w: string, r: string) => `お手伝いします！「${w}」はリストにありませんが、「${r}」は知っていますか？`
-  },
-  ko: {
-    meaning: (w: string, m: string, b: string) => `선택한 단어 "${w}"의 의미는 "${m}"입니다. "${b}"라고 읽으면 됩니다.`,
-    fallback: (w: string, r: string) => `도와드릴게요! "${w}"는 없지만 "${r}"은(는) 아시나요?`
-  },
-  zh: {
-    meaning: (w: string, m: string, b: string) => `所选词语“${w}”的意思是“${m}”。您可以读作“${b}”。`,
-    fallback: (w: string, r: string) => `我很乐意帮忙！“${w}”不在列表中，但你知道“${r}”吗？`
-  },
-  ar: {
-    meaning: (w: string, m: string, b: string) => `معنى الكلمة المختارة "${w}" هو "${m}". يمكنك قراءتها كـ "${b}".`,
-    fallback: (w: string, r: string) => `أنا هنا للمساعدة! "${w}" ليست لدي، هل تعرف "${r}"؟`
-  },
   en: {
-    meaning: (w: string, m: string, b: string) => `The meaning of the selected word "${w}" is "${m}". You can read it as "${b}".`,
+    intro: "Selected phrase",
+    mapping: (w: string, b: string) => `${w} : ${b}`,
+    instruction: "You can read it as",
+    outro: "",
     fallback: (w: string, r: string) => `I'm here to help! "${w}" isn't in my teaching deck. Do you know the meaning of "${r}"?`
   }
 };
 
 /**
- * 🌐 THE MATRIX ENGINE
+ * 🌐 THE MATRIX ENGINE (Core Translation Logic)
  */
 export const translateText = async (
   text: string,
   sourceLang: string,
   targetLang: string,
-  bypassCache: boolean = false
+  bypassCache: boolean = false,
+  signal?: AbortSignal
 ): Promise<TranslationResult> => {
   if (!text || !text.trim()) throw new Error("Input text is empty");
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   
   const rectifiedText = preFixTypos(text.trim());
   
@@ -121,11 +70,13 @@ export const translateText = async (
     if (matrixEntry && matrixEntry.matrix_data[targetLang]) {
         const targetData = matrixEntry.matrix_data[targetLang];
         const sourceData = matrixEntry.matrix_data[sourceLang] || { n: rectifiedText, l: rectifiedText };
-        
+        const bridge = targetData.b?.[sourceLang] || transliterateWord(targetData.l, sourceLang);
+
         const result: TranslationResult = {
           originalText: sourceData.n,
           translatedText: targetData.n,
           pronunciationLatin: targetData.l,
+          pronunciationSourceScript: bridge,
           category: matrixEntry.category || "Collective Knowledge",
           sourceLanguage: sourceLang,
           targetLanguage: targetLang,
@@ -140,19 +91,33 @@ export const translateText = async (
   }
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const coreLangs = ['hi', 'kn', 'en', 'te', 'ml', 'ta', 'mr', 'gu', 'bn', 'ur', 'es', 'fr', 'de', 'ja', 'ko', 'zh', 'ar', 'pa', 'as', 'or'];
   
-  const prompt = `Linguistic Matrix Task: Convert "${rectifiedText}" (Lang: ${sourceLang}) into a 20-language bridge matrix.
+  const criticalBridgeProps: any = {
+    [sourceLang]: { type: Type.STRING },
+    [targetLang]: { type: Type.STRING },
+    'en': { type: Type.STRING },
+    'hi': { type: Type.STRING },
+    'kn': { type: Type.STRING }
+  };
 
-REQUIRED STRUCTURE:
-1. "en_anchor": Simple English concept phrase (2-3 words).
-2. "category": One word context (Travel, Dining, First Meet, Doctor, Greetings, Conversation).
-3. "matrix": Map for all codes: [${coreLangs.join(', ')}].
-   - "n": Clean translation in native script.
-   - "l": Readable Phonetic Latin bridge.`;
+  const prompt = `Linguistic Matrix Task: Analyze "${rectifiedText}" (Source Lang: ${sourceLang}). 
+  1. Translate this accurately into ALL 20 codes: [${CORE_LANGS.join(', ')}].
+  2. STRICT CASE PHONETIC RULE: Indic retroflex sounds (hard sounds like ट, ట, ಟ) MUST use UPPERCASE Latin (T, D, N, L). 
+     - Dental sounds (soft sounds like त, త, ತ) MUST use LOWERCASE Latin (t, d, n, l).
+     - Example: Telugu "ఏమిటి" (What) MUST be phonetically "emiTi" (NOT emiti). 
+     - This ensures the transliteration engine creates the correct script (ಟ vs ತ).
+  3. For EACH language code, provide:
+     - "n": The translation in native script.
+     - "l": Phonetic Latin pronunciation following Rule #2.
+     - "b": A record of "bridges". Ensure for codes [${sourceLang}, ${targetLang}, en, hi, kn], you write the pronunciation of "n" using THAT code's script.
+  4. "en_anchor": Simple English phrase for the concept.
+  5. "category": Context category (Medical, Social, Travel, etc.).
+  6. BREAKDOWN TASK: Provide a "words" array for the main pair (${sourceLang} -> ${targetLang}). 
+
+  RETURN STRICT JSON ONLY.`;
 
   try {
-    const response = await ai.models.generateContent({
+    const responsePromise = ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: prompt,
       config: { 
@@ -164,51 +129,133 @@ REQUIRED STRUCTURE:
             category: { type: Type.STRING },
             matrix: {
               type: Type.OBJECT,
-              properties: coreLangs.reduce((acc: any, code) => {
+              properties: CORE_LANGS.reduce((acc: any, code) => {
                 acc[code] = { 
                   type: Type.OBJECT, 
-                  properties: { n: { type: Type.STRING }, l: { type: Type.STRING } }, 
+                  properties: { 
+                    n: { type: Type.STRING }, 
+                    l: { type: Type.STRING },
+                    b: { 
+                      type: Type.OBJECT, 
+                      description: "Map of bridges to critical language scripts",
+                      properties: criticalBridgeProps 
+                    }
+                  }, 
                   required: ["n", "l"] 
                 };
                 return acc;
               }, {})
+            },
+            words: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  original: { type: Type.STRING },
+                  translated: { type: Type.STRING },
+                  pronunciationSourceScript: { type: Type.STRING },
+                  pronunciationLatin: { type: Type.STRING }
+                },
+                required: ['original', 'translated', 'pronunciationSourceScript']
+              }
             }
           },
-          required: ['en_anchor', 'matrix']
+          required: ['en_anchor', 'matrix', 'words']
         },
-        temperature: 0.1 
+        temperature: 0.1,
+        thinkingConfig: { thinkingBudget: 0 } 
       }
     });
 
-    const json = JSON.parse(response.text || "{}");
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    const response = await responsePromise;
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+    const rawText = cleanJson(response.text || "{}");
+    const json = JSON.parse(rawText);
     const matrix: Record<string, MatrixLangData> = json.matrix || {};
-    const finalAnchor = json.en_anchor?.toLowerCase().trim() || rectifiedText.toLowerCase();
+    const finalAnchor = (json.en_anchor || '').toString().toLowerCase().trim() || rectifiedText.toLowerCase();
     const targetData = matrix[targetLang] || { n: rectifiedText, l: rectifiedText };
-    
+    const bridge = targetData.b?.[sourceLang] || transliterateWord(targetData.l, sourceLang);
+
     const result: TranslationResult = {
       originalText: rectifiedText,
-      translatedText: targetData.n,
-      pronunciationLatin: targetData.l,
+      translatedText: targetData.n || rectifiedText,
+      pronunciationLatin: targetData.l || '',
+      pronunciationSourceScript: bridge,
       category: json.category || "General",
       sourceLanguage: sourceLang,
       targetLanguage: targetLang,
       en_anchor: finalAnchor,
       matrix: matrix,
-      words: [] 
+      words: json.words || [] 
     };
+
+    userService.saveMatrixEntry({ 
+      en_anchor: finalAnchor, 
+      category: json.category || 'General', 
+      matrix_data: matrix 
+    }).catch(console.warn);
 
     cacheService.saveTranslation(rectifiedText, sourceLang, targetLang, result);
     return result;
   } catch (error: any) {
+    if (error.name === 'AbortError' || signal?.aborted) throw new DOMException("Aborted", "AbortError");
     console.error("Matrix Engine Error:", error);
-    throw new Error("Matrix is realigning. Please try again.");
+    throw new Error("Matrix engine sync failed.");
   }
 };
 
-export const generateQuiz = async (sourceLang: string, targetLang: string, isPro: boolean): Promise<QuizResult> => {
-  return generateLocalQuiz(sourceLang, targetLang, isPro);
+/**
+ * 🏆 LOCALIZED CHAT RESPONSE BUILDER
+ */
+const buildTutorMessage = (
+  sourceNative: string, 
+  fullBridge: string, 
+  words: WordPair[], 
+  langCode: string
+): string => {
+  const templates = TUTOR_STRINGS[langCode] || TUTOR_STRINGS['en'];
+  
+  const lines = [
+    templates.intro,
+    `"${sourceNative}"`
+  ];
+
+  if (words && words.length > 0) {
+    words.forEach(w => {
+      lines.push(templates.mapping(w.original, w.pronunciationSourceScript || w.pronunciationLatin || ''));
+    });
+  } else {
+    const sTokens = sourceNative.replace(/[।.,!?]/g, "").split(/\s+/).filter(t => t.length > 0);
+    const bTokens = fullBridge.replace(/[।.,!?]/g, "").split(/\s+/).filter(t => t.length > 0);
+    
+    if (sTokens.length === bTokens.length) {
+       sTokens.forEach((st, i) => {
+         lines.push(templates.mapping(st, bTokens[i]));
+       });
+    } else {
+       sTokens.forEach((st, i) => {
+          if (bTokens[i]) lines.push(templates.mapping(st, bTokens[i]));
+       });
+    }
+  }
+
+  lines.push(templates.instruction);
+  lines.push(`"${fullBridge}`);
+  
+  if (templates.outro) {
+    lines.push(templates.outro + '"');
+  } else {
+    lines[lines.length - 1] += '"';
+  }
+
+  return lines.join("\n");
 };
 
+/**
+ * 🏆 LOCALIZED CHAT RESPONSE
+ */
 export const generateChatResponse = async (
   history: ChatMessage[], 
   newMessage: string, 
@@ -216,39 +263,43 @@ export const generateChatResponse = async (
   targetLang: string
 ): Promise<{ message: ChatMessage; isLocal: true }> => {
   const templates = TUTOR_STRINGS[sourceLang] || TUTOR_STRINGS['en'];
+  const normInput = (newMessage || '').toString().trim().toLowerCase();
 
-  // 1. Search cached matrix matches
-  const cached = cacheService.getFuzzyMatch(newMessage, sourceLang, targetLang);
+  const cached = cacheService.getFuzzyMatch(normInput, sourceLang, targetLang);
   if (cached) {
     return {
       message: { 
         role: 'model', 
-        text: templates.meaning(newMessage, cached.translatedText, cached.pronunciationSourceScript || cached.pronunciationLatin)
+        text: buildTutorMessage(cached.originalText, cached.pronunciationSourceScript || cached.pronunciationLatin || '', cached.words || [], sourceLang)
       },
       isLocal: true
     };
   }
 
-  // 2. Search Static Dictionaries (Grounded)
   const lessons = await generateStaticLessons(sourceLang, targetLang);
-  const normInput = newMessage.trim().toLowerCase();
   const match = lessons.find(l => 
-    l.source_native.toLowerCase() === normInput || 
-    l.source_transliteration.toLowerCase() === normInput
+    (l.source_native || '').toLowerCase() === normInput || 
+    (l.source_transliteration || '').toLowerCase() === normInput
   );
 
   if (match) {
     return {
       message: { 
         role: 'model', 
-        text: templates.meaning(match.source_native, match.target_native, match.target_in_source_script)
+        text: buildTutorMessage(match.source_native, match.target_in_source_script || '', [], sourceLang)
       },
       isLocal: true
     };
   }
 
-  // 3. TUTOR FALLBACK
-  const randomPrompt = lessons[Math.floor(Math.random() * Math.min(lessons.length, 30))];
+  const pool = lessons.length > 0 ? lessons : [];
+  if (pool.length === 0) {
+      return {
+          message: { role: 'model', text: 'Knowledge Deck initializing...' },
+          isLocal: true
+      }
+  }
+  const randomPrompt = pool[Math.floor(Math.random() * pool.length)];
 
   return {
     message: { 
@@ -257,6 +308,10 @@ export const generateChatResponse = async (
     },
     isLocal: true
   };
+};
+
+export const generateQuiz = async (sourceLang: string, targetLang: string, isPro: boolean): Promise<QuizResult> => {
+  return generateLocalQuiz(sourceLang, targetLang, isPro);
 };
 
 export const generateLessons = async (s: string, t: string, tier: string, sN: string, tN: string): Promise<LessonResponse> => {

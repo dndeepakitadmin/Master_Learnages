@@ -1,16 +1,13 @@
-
 import {
   UserProfile,
   PaymentHistoryItem,
   SupportTicket,
   LessonItem,
   MatrixEntry,
-  MatrixLangData,
   UserRole
 } from '../types';
 
 import {
-  SUBSCRIPTION_DAYS,
   LIMIT_CHARS,
   LIMIT_CHATS,
   LIMIT_QUIZZES,
@@ -22,108 +19,58 @@ import {
   forceLogoutStorageClear
 } from '../lib/supabaseClient';
 
-export const getModuleKey = (
-  source: string,
-  target: string,
-  type: 'chars' | 'chats' | 'quizzes' | 'score' = 'chars'
-) => `${source}-${target}-${type}`;
+const GUEST_USAGE_KEY = 'learnages_guest_usage';
+
+const getDbModuleKey = (source: string, target: string, type: string) => `${source}-${target}-${type}`;
 
 export const userService = {
 
-  /* ---------------- BASIC HELPERS ---------------- */
-
-  formatPhone(phone: string, countryCode: string = '+91'): string {
-    if (!phone) return '';
-    let digits = phone.replace(/\D/g, '');
-    if (countryCode === '+91' && digits.length > 10) {
-      digits = digits.slice(-10);
-    }
-    return `${countryCode}${digits}`;
-  },
-
-  async getEmailByPhone(phoneInput: string, countryCode: string = '+91'): Promise<string | null> {
-    const cleanInput = phoneInput.replace(/\D/g, '');
-    if (cleanInput.length < 10) {
-      console.warn("Lookup Aborted: Phone input too short", cleanInput);
-      return null;
-    }
-    const last10 = cleanInput.slice(-10);
-
+  /* ---------------- GUEST TRACKING ---------------- */
+  
+  getGuestUsage(moduleName: string) {
     try {
-      console.log("Database Lookup Initiated for suffix:", last10);
-      
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('email, phone')
-        .ilike('phone', `%${last10}`)
-        .maybeSingle();
-
-      if (error) {
-        console.error("Database Query Error Details:", {
-          message: error.message,
-          details: error.details,
-          code: error.code
-        });
-        
-        if (error.message?.includes('Failed to fetch')) {
-          throw new Error("Failed to fetch: Check your internet connection or verify if the Supabase project is active.");
-        }
-        return null;
-      }
-
-      if (!data) {
-        console.warn("Database Lookup Result: No user matches the provided phone suffix.");
-        return null;
-      }
-
-      console.log("Database Lookup Success: Found linked email", data.email);
-      return data?.email?.trim().toLowerCase() || null;
-    } catch (err: any) {
-      console.error("Critical Exception during database lookup:", err);
-      // Re-throw descriptive network errors to be handled by extractErrorString
-      if (err.message?.includes('Failed to fetch')) throw err;
-      return null;
+      const data = localStorage.getItem(GUEST_USAGE_KEY);
+      const usage = data ? JSON.parse(data) : {};
+      const moduleData = usage[moduleName] || {};
+      return {
+        chars_count: Number(moduleData.chars_count) || 0,
+        chats_count: Number(moduleData.chats_count) || 0,
+        quizzes_count: Number(moduleData.quizzes_count) || 0,
+        quiz_score: Number(moduleData.quiz_score) || 0
+      };
+    } catch {
+      return { chars_count: 0, chats_count: 0, quizzes_count: 0, quiz_score: 0 };
     }
   },
 
-  async checkPhoneExists(phoneInput: string, countryCode: string = '+91'): Promise<boolean> {
-    const cleanInput = phoneInput.replace(/\D/g, '');
-    if (cleanInput.length < 10) return false;
-    const last10 = cleanInput.slice(-10);
+  setGuestUsage(moduleName: string, updates: any) {
     try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('id')
-          .ilike('phone', `%${last10}`)
-          .maybeSingle();
-        return !!data;
-    } catch { return false; }
+      const data = localStorage.getItem(GUEST_USAGE_KEY);
+      const usage = data ? JSON.parse(data) : {};
+      const current = usage[moduleName] || { chars_count: 0, chats_count: 0, quizzes_count: 0, quiz_score: 0 };
+      usage[moduleName] = { ...current, ...updates };
+      localStorage.setItem(GUEST_USAGE_KEY, JSON.stringify(usage));
+      return usage[moduleName];
+    } catch {
+      return updates;
+    }
   },
 
   /* ---------------- AUTH / PROFILE ---------------- */
 
   async createProfile(id: string, email: string, phone: string, name: string) {
-    const role: UserRole = GLOBAL_ADMIN_EMAILS.includes(email.toLowerCase()) ? 'global_admin' : 'user';
-    const { error } = await supabase
-      .from('profiles')
-      .upsert({ id, email: email.toLowerCase(), phone: phone || null, name, role }, { onConflict: 'id' });
-    if (error) throw error;
-  },
+    const role: UserRole = GLOBAL_ADMIN_EMAILS.includes(email.toLowerCase())
+      ? 'global_admin'
+      : 'user';
 
-  async updateProfile(id: string, updates: { name?: string, phone?: string }) {
     const { error } = await supabase
       .from('profiles')
-      .update(updates)
-      .eq('id', id);
-    
+      .upsert(
+        { id, email: email.toLowerCase(), phone: phone || null, name, role },
+        { onConflict: 'id' }
+      );
+
     if (error) throw error;
-    
-    const cached = localStorage.getItem('learnages_user');
-    if (cached) {
-      const user = JSON.parse(cached);
-      localStorage.setItem('learnages_user', JSON.stringify({ ...user, ...updates }));
-    }
-    return true;
   },
 
   async getCurrentUser(): Promise<UserProfile> {
@@ -151,244 +98,422 @@ export const userService = {
         .maybeSingle();
 
       if (!profile) {
-        const meta = session.user.user_metadata;
-        const capturedName = meta?.full_name || meta?.name || 'Learner';
-        await this.createProfile(userId, userEmail, '', capturedName);
-        const { data: newProfile } = await supabase.from('profiles').select('*').eq('id', userId).single();
+        await this.createProfile(userId, userEmail, '', 'Learner');
+        const { data: newProfile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .single();
         profile = newProfile;
       }
-
-      let role: UserRole = profile?.role || 'user';
-      if (GLOBAL_ADMIN_EMAILS.includes(userEmail.toLowerCase())) {
-        role = 'global_admin';
-        if (profile?.role !== 'global_admin') {
-          await supabase.from('profiles').update({ role: 'global_admin' }).eq('id', userId);
-        }
-      }
-
-      const [usageRes, subRes] = await Promise.all([
-        supabase.from('usage_logs').select('module, usage_count').eq('user_id', userId),
-        supabase.from('subscriptions').select('module, expiry').eq('user_id', userId)
-      ]);
 
       const user: UserProfile = {
         id: userId,
         email: userEmail,
         name: profile?.name || 'Learner',
         phone: profile?.phone || '',
-        role: role,
+        role: profile?.role || 'user',
         isAuthenticated: true,
         usage: {},
         subscriptions: {}
       };
 
-      if (usageRes.data) {
-        usageRes.data.forEach((r: any) => {
-          user.usage[r.module] = r.usage_count;
-        });
-      }
-
-      if (subRes.data) {
-        subRes.data.forEach((r: any) => {
-          user.subscriptions[r.module] = new Date(r.expiry).getTime();
-        });
-      }
-
       localStorage.setItem('learnages_user', JSON.stringify(user));
       return user;
-
-    } catch (e: any) {
-      console.warn("User sync failed", e?.message || JSON.stringify(e));
+    } catch {
       const cached = localStorage.getItem('learnages_user');
-      return cached ? JSON.parse(cached) : { name: 'Learner', email: '', phone: '', role: 'user', isAuthenticated: false, subscriptions: {}, usage: {} };
+      return cached
+        ? JSON.parse(cached)
+        : { name: 'Learner', email: '', phone: '', role: 'user', isAuthenticated: false, subscriptions: {}, usage: {} };
     }
   },
 
-  /* ---------------- RAZORPAY ---------------- */
+  formatPhone(phone: string, countryCode: string): string {
+    const cleaned = (phone || '').replace(/\D/g, '');
+    return `${countryCode}${cleaned}`;
+  },
+
+  async checkPhoneExists(phone: string, countryCode: string): Promise<boolean> {
+    const fullPhone = this.formatPhone(phone, countryCode);
+    const { data } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('phone', fullPhone)
+      .maybeSingle();
+    return !!data;
+  },
+
+  async getEmailByPhone(phone: string, countryCode: string): Promise<string | null> {
+    const fullPhone = this.formatPhone(phone, countryCode);
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('email')
+      .eq('phone', fullPhone)
+      .maybeSingle();
+    if (error) return null;
+    return data?.email || null;
+  },
+
+  /* ---------------- USAGE & SUBSCRIPTIONS ---------------- */
+
+  async getModuleStatus(source: string, target: string) {
+    const { data: { session } } = await supabase.auth.getSession();
+    const pairName = `${source}-${target}`;
+    const guestUsage = this.getGuestUsage(pairName);
+
+    if (!session) {
+      return {
+        isPro: false,
+        usageChars: guestUsage.chars_count || 0,
+        usageChats: guestUsage.chats_count || 0,
+        usageQuizzes: guestUsage.quizzes_count || 0,
+        limitChars: LIMIT_CHARS,
+        limitChats: LIMIT_CHATS,
+        limitQuizzes: LIMIT_QUIZZES,
+        expiry: 0,
+        isAuthenticated: false
+      };
+    }
+
+    const userId = session.user.id;
+
+    const { data: sub } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('module', pairName)
+      .gt('expiry', new Date().toISOString())
+      .maybeSingle();
+    
+    const { data: usageRows } = await supabase
+      .from('usage_logs')
+      .select('module, usage_count')
+      .eq('user_id', userId)
+      .ilike('module', `${pairName}-%`);
+
+    const usageMap: Record<string, number> = {};
+    (usageRows || []).forEach(row => {
+      const type = row.module.split('-').pop() || '';
+      usageMap[type] = (usageMap[type] || 0) + Number(row.usage_count);
+    });
+
+    return {
+      isPro: !!sub,
+      usageChars: (usageMap['chars'] || 0) + (guestUsage.chars_count || 0),
+      usageChats: (usageMap['chats'] || 0) + (guestUsage.chats_count || 0),
+      usageQuizzes: (usageMap['quizzes'] || 0) + (guestUsage.quizzes_count || 0),
+      limitChars: LIMIT_CHARS,
+      limitChats: LIMIT_CHATS,
+      limitQuizzes: LIMIT_QUIZZES,
+      expiry: sub ? new Date(sub.expiry).getTime() : 0,
+      isAuthenticated: true
+    };
+  },
+
+  async incrementUsage(source: string, target: string, amount: number, type: 'chars' | 'chats' | 'quizzes'): Promise<number> {
+    const { data: { session } } = await supabase.auth.getSession();
+    const pairName = `${source}-${target}`;
+    const dbModule = getDbModuleKey(source, target, type);
+
+    if (!session) {
+      const current = this.getGuestUsage(pairName) as any;
+      const field = `${type}_count`;
+      const newVal = (current[field] || 0) + amount;
+      this.setGuestUsage(pairName, { [field]: newVal });
+      return newVal;
+    }
+
+    const guestUsage = this.getGuestUsage(pairName) as any;
+    const guestVal = Number(guestUsage[`${type}_count`]) || 0;
+
+    const { data: current } = await supabase
+      .from('usage_logs')
+      .select('id, usage_count')
+      .eq('user_id', session.user.id)
+      .eq('module', dbModule)
+      .maybeSingle();
+
+    const baseVal = current ? (Number(current.usage_count) || 0) : 0;
+    const newVal = baseVal + guestVal + amount; 
+
+    if (current) {
+      await supabase
+        .from('usage_logs')
+        .update({ usage_count: newVal })
+        .eq('id', current.id);
+    } else {
+      await supabase
+        .from('usage_logs')
+        .insert({
+          user_id: session.user.id,
+          module: dbModule,
+          usage_count: newVal
+        });
+    }
+
+    this.setGuestUsage(pairName, { [`${type}_count`]: 0 });
+    return newVal;
+  },
 
   async createRazorpayOrder(amount: number) {
+    const { data, error } = await supabase.functions.invoke('create-razorpay-order', {
+      body: { amount }
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  async subscribeToModule(source: string, target: string, days: number, paymentId: string) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error("Authentication required to synchronize Pro access.");
+    
+    const pairName = `${source}-${target}`;
+    const expiry = new Date();
+    expiry.setDate(expiry.getDate() + days);
+
+    const { error: subError } = await supabase
+      .from('subscriptions')
+      .upsert({
+        user_id: session.user.id,
+        module: pairName,
+        expiry: expiry.toISOString()
+      }, { onConflict: 'user_id,module' });
+
+    if (subError) throw subError;
+
+    await supabase.from('payment_history').insert({
+      user_id: session.user.id,
+      module: pairName,
+      expiry: expiry.toISOString()
+    });
+  },
+
+  async getPaymentHistory(): Promise<PaymentHistoryItem[]> {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return [];
+    const { data } = await supabase
+      .from('payment_history')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('created_at', { ascending: false });
+    return (data || []) as PaymentHistoryItem[];
+  },
+
+  /* ---------------- LINGUISTIC MATRIX (CLOUD DECK) ---------------- */
+
+  async getGlobalMatrixDeck(): Promise<MatrixEntry[]> {
     try {
-      const { data, error } = await supabase.functions.invoke('create-razorpay-order', {
-        body: { amount }
-      });
-      if (error) throw new Error(error.message);
-      return data;
-    } catch (err: any) {
-      throw new Error(err.message || "Gateway unreachable.");
+      const { data, error } = await supabase
+        .from('global_matrix')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return (data || []) as MatrixEntry[];
+    } catch (e) {
+      console.warn("Matrix fetch failed:", e);
+      return [];
     }
   },
 
-  /* ---------------- MATRIX & LESSONS ---------------- */
+  async saveUserLesson(sourceText: string, targetText: string, pronunciation: string, sourceLang: string, targetLang: string, category: string = 'General') {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    await supabase.from('user_lessons').insert({
+      user_id: session.user.id,
+      source_text: sourceText,
+      target_text: targetText,
+      pronunciation,
+      source_lang: sourceLang,
+      target_lang: targetLang,
+      category
+    });
+  },
 
-  async saveMatrixEntry(entry: MatrixEntry) {
+  async getUserLessons(source: string, target: string): Promise<LessonItem[]> {
     try {
-      const anchor = entry.en_anchor?.toLowerCase().trim();
-      if (!anchor) return;
-      const { data: existing } = await supabase.from('global_matrix').select('matrix_data').eq('en_anchor', anchor).maybeSingle();
-      const merged = existing ? { ...existing.matrix_data, ...entry.matrix_data } : entry.matrix_data;
-      await supabase.from('global_matrix').upsert({ en_anchor: anchor, category: entry.category || 'General', matrix_data: merged }, { onConflict: 'en_anchor' });
-    } catch (e: any) { console.warn("Matrix sync failure", e?.message || JSON.stringify(e)); }
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return [];
+      const { data } = await supabase
+        .from('user_lessons')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .eq('source_lang', source)
+        .eq('target_lang', target)
+        .order('created_at', { ascending: false });
+      
+      return (data || []).map(d => ({
+        source_native: d.source_text,
+        source_transliteration: '',
+        target_native: d.target_text,
+        target_transliteration: '',
+        target_in_source_script: d.pronunciation,
+        meaning_english: 'Recent Matrix Addition',
+        note: d.category || 'My Findings',
+        is_custom: true
+      }));
+    } catch { return []; }
   },
 
   async searchGlobalMatrix(searchText: string, langCode: string): Promise<MatrixEntry | null> {
     try {
-      const clean = searchText.toLowerCase().trim();
-      const { data } = await supabase.from('global_matrix').select('*').or(`en_anchor.eq.${clean},matrix_data->${langCode}->>n.ilike.%${clean}%`).limit(1).maybeSingle();
+      const clean = (searchText || '').toString().toLowerCase().trim();
+      if (!clean) return null;
+      
+      const { data } = await supabase
+        .from('global_matrix')
+        .select('*')
+        .or(`en_anchor.eq.${clean},matrix_data->${langCode}->>n.ilike.${clean}%,matrix_data->${langCode}->>l.ilike.${clean}%`)
+        .limit(1)
+        .maybeSingle();
+
       return data as MatrixEntry;
-    } catch { return null; }
-  },
-
-  async getRecentMatrixEntries(sourceLang: string, targetLang: string): Promise<LessonItem[]> {
-    try {
-      const { data } = await supabase.from('global_matrix').select('*').order('created_at', { ascending: false }).limit(100);
-      if (!data) return [];
-      return data.filter(e => e.matrix_data[sourceLang] && e.matrix_data[targetLang]).map(e => ({
-          source_native: e.matrix_data[sourceLang].n,
-          source_transliteration: e.matrix_data[sourceLang].l,
-          target_native: e.matrix_data[targetLang].n,
-          target_transliteration: e.matrix_data[targetLang].l,
-          target_in_source_script: '', 
-          meaning_english: e.en_anchor,
-          note: e.category || 'Collective Knowledge',
-          is_custom: true
-        }));
-    } catch { return []; }
-  },
-
-  async getUserLessons(sourceLang: string, targetLang: string): Promise<LessonItem[]> {
-    let combined: LessonItem[] = [];
-    try {
-      const { data } = await supabase.from('user_lessons').select('*').eq('source_lang', sourceLang).eq('target_lang', targetLang).order('created_at', { ascending: false });
-      if (data) combined = data.map(i => ({ source_native: i.original, source_transliteration: '', target_native: i.translated, target_transliteration: '', target_in_source_script: i.bridge, meaning_english: '', note: i.category || 'Contribution', is_custom: true }));
-    } catch {}
-    return combined;
-  },
-
-  async saveUserLesson(original: string, translated: string, bridge: string, sourceLang: string, targetLang: string, aiCategory?: string) {
-    const payload: any = { source_lang: sourceLang, target_lang: targetLang, original: original.trim(), translated: translated.trim(), bridge: bridge.trim(), category: aiCategory || 'General' };
-    try {
-      const { data: session } = await supabase.auth.getSession();
-      if (session.session?.user?.id) { payload.user_id = session.session.user.id; await supabase.from('user_lessons').insert(payload); }
-    } catch {}
-  },
-
-  /* ---------------- STATUS ---------------- */
-
-  async getModuleStatus(source: string, target: string) {
-    const user = await this.getCurrentUser();
-    const proKey = `${source}-${target}`;
-    const expiry = user.subscriptions?.[proKey];
-    return { isPro: !!(expiry && expiry > Date.now()), usageChars: user.usage?.[getModuleKey(source, target, 'chars')] || 0, usageChats: user.usage?.[getModuleKey(source, target, 'chats')] || 0, usageQuizzes: user.usage?.[getModuleKey(source, target, 'quizzes')] || 0, limitChars: LIMIT_CHARS, limitChats: LIMIT_CHATS, limitQuizzes: LIMIT_QUIZZES, expiry, isAuthenticated: user.isAuthenticated };
-  },
-
-  async incrementUsage(source: string, target: string, amount: number, type: 'chars' | 'chats' | 'quizzes' = 'chars') {
-    const user = await this.getCurrentUser();
-    const key = getModuleKey(source, target, type);
-    if (!user.usage) user.usage = {};
-    user.usage[key] = (user.usage[key] || 0) + amount;
-    localStorage.setItem('learnages_user', JSON.stringify(user));
-    if (user.id) await supabase.from('usage_logs').upsert({ user_id: user.id, module: key, usage_count: user.usage[key] }, { onConflict: 'user_id,module' });
-    return user.usage[key];
-  },
-
-  async subscribeToModule(source: string, target: string, days: number = SUBSCRIPTION_DAYS, paymentId?: string) {
-    const { data: { user }, error: userErr } = await supabase.auth.getUser();
-    if (userErr || !user) throw new Error("Authentication failed. Please sign in again.");
-
-    const userId = user.id;
-    const expiryDate = new Date(); 
-    expiryDate.setDate(expiryDate.getDate() + days);
-    
-    const moduleKey = `${source}-${target}`;
-    
-    const { error } = await supabase.from('subscriptions').upsert({ 
-      user_id: userId, 
-      module: moduleKey, 
-      expiry: expiryDate.toISOString(), 
-      payment_id: paymentId || null 
-    }, { onConflict: 'user_id,module' });
-
-    if (error) {
-        console.error("Database Activation Error:", error.message || JSON.stringify(error));
-        throw new Error(`Sync Error: ${error.message || 'Database rejected activation'}`);
+    } catch {
+      return null;
     }
-
-    localStorage.removeItem('learnages_user');
-    return await this.getCurrentUser();
   },
+
+  /**
+   * 🌐 GLOBAL SUGGESTION ENGINE
+   * Searches across ALL languages in the matrix for phonetic or anchor matches.
+   */
+  async searchMatrixSuggestions(prefix: string, sourceLang: string, targetLang: string): Promise<LessonItem[]> {
+    if (!prefix || prefix.length < 3) return [];
+    const cleanPrefix = (prefix || '').toString().toLowerCase();
+    const results: LessonItem[] = [];
+
+    try {
+      // 🕵️ GLOBAL QUERY: Check anchors and JSON data across the whole matrix table
+      const { data: matrixData } = await supabase
+        .from('global_matrix')
+        .select('*')
+        .or(`en_anchor.ilike.%${cleanPrefix}%`)
+        .limit(15);
+
+      (matrixData || []).forEach(m => {
+        // If the entry has data for our specific current pair, include it
+        if (m.matrix_data[sourceLang] && m.matrix_data[targetLang]) {
+          results.push({
+            source_native: m.matrix_data[sourceLang].n,
+            source_transliteration: m.matrix_data[sourceLang].l,
+            target_native: m.matrix_data[targetLang].n,
+            target_transliteration: m.matrix_data[targetLang].l,
+            target_in_source_script: m.matrix_data[targetLang].b?.[sourceLang] || '',
+            meaning_english: m.en_anchor,
+            note: m.category,
+            is_custom: false
+          });
+        }
+      });
+
+      return results;
+    } catch (e) {
+      console.error("DB Suggestion Error:", e);
+      return [];
+    }
+  },
+
+  async saveMatrixEntry(entry: Partial<MatrixEntry>) {
+    const { error } = await supabase
+      .from('global_matrix')
+      .upsert({
+        en_anchor: entry.en_anchor,
+        category: entry.category,
+        matrix_data: entry.matrix_data
+      }, { onConflict: 'en_anchor' });
+    if (error) throw error;
+  },
+
+  /* ---------------- QUIZ & XP ---------------- */
 
   async getQuizScore(source: string, target: string): Promise<number> {
-    const user = await this.getCurrentUser();
-    return user.usage?.[getModuleKey(source, target, 'score')] || 0;
+    const pairName = `${source}-${target}`;
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      return this.getGuestUsage(pairName).quiz_score;
+    }
+
+    const { data } = await supabase
+      .from('profiles')
+      .select('usage')
+      .eq('id', session.user.id)
+      .maybeSingle();
+    
+    const usage = data?.usage || {};
+    return Number(usage[`${pairName}-score`]) || 0;
   },
 
   async updateQuizScore(source: string, target: string, score: number): Promise<number> {
-    const user = await this.getCurrentUser();
-    const key = getModuleKey(source, target, 'score');
-    if (!user.usage) user.usage = {};
-    const total = (user.usage[key] || 0) + score;
-    user.usage[key] = total;
-    localStorage.setItem('learnages_user', JSON.stringify(user));
-    if (user.id) await supabase.from('usage_logs').upsert({ user_id: user.id, module: key, usage_count: total }, { onConflict: 'user_id,module' });
-    return total;
+    const pairName = `${source}-${target}`;
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      const current = this.getGuestUsage(pairName);
+      const newScore = (current.quiz_score || 0) + score;
+      this.setGuestUsage(pairName, { quiz_score: newScore });
+      return newScore;
+    }
+
+    const currentScore = await this.getQuizScore(source, target);
+    const newScore = currentScore + score;
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('usage')
+      .eq('id', session.user.id)
+      .maybeSingle();
+
+    const updatedUsage = { ...(profile?.usage || {}), [`${pairName}-score`]: newScore };
+
+    await supabase
+      .from('profiles')
+      .update({ usage: updatedUsage })
+      .eq('id', session.user.id);
+
+    return newScore;
   },
 
-  async getPaymentHistory(): Promise<PaymentHistoryItem[]> {
-    const user = await this.getCurrentUser();
-    if (!user.id) return [];
-    const { data, error } = await supabase.from('subscriptions').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
-    if (error) {
-       console.error("Payment history fetch failed:", error.message || JSON.stringify(error));
-       return [];
-    }
-    return (data || []).map((i: any) => ({ id: i.id || String(Math.random()), user_id: i.user_id, module: i.module, expiry: i.expiry, created_at: i.created_at }));
+  /* ---------------- SUPPORT SYSTEM ---------------- */
+
+  async createSupportTicket(category: string, message: string): Promise<string> {
+    const { data: { session } } = await supabase.auth.getSession();
+    const ticketNo = `SR${Math.floor(100000 + Math.random() * 900000)}`;
+    const { error } = await supabase
+      .from('support_tickets')
+      .insert({
+        user_id: session?.user.id,
+        category,
+        message,
+        ticket_no: ticketNo,
+        status: 'open'
+      });
+    if (error) throw error;
+    return ticketNo;
   },
 
   async getTicketHistory(): Promise<SupportTicket[]> {
-    const user = await this.getCurrentUser();
-    if (!user.id) return [];
-    const { data, error } = await supabase.from('support_tickets').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
-    if (error) {
-       console.error("Ticket history fetch failed:", error.message || JSON.stringify(error));
-       return [];
-    }
-    return data || [];
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return [];
+    const { data } = await supabase
+      .from('support_tickets')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('created_at', { ascending: false });
+    return (data || []) as SupportTicket[];
   },
 
-  async createSupportTicket(category: string, message: string): Promise<string> {
-    const user = await this.getCurrentUser();
-    if (!user.isAuthenticated) throw new Error("Authentication required to raise a ticket.");
-    
-    const { count, error: countErr } = await supabase.from('support_tickets').select('*', { count: 'exact', head: true });
-    const ticketNo = 'SR-' + (10001 + (count || 0));
+  /* ---------------- PROFILE MANAGEMENT ---------------- */
 
-    const { data, error } = await supabase.from('support_tickets').insert({ 
-      category, 
-      message, 
-      user_id: user.id || null,
-      ticket_no: ticketNo,
-      status: 'open'
-    }).select('ticket_no').single();
-    
-    if (error) {
-       console.error("Create Ticket Error:", error.message || JSON.stringify(error));
-       throw error;
-    }
-    return data?.ticket_no || ticketNo;
+  async updateProfile(id: string, updates: { name: string; phone: string }) {
+    const { error } = await supabase
+      .from('profiles')
+      .update(updates)
+      .eq('id', id);
+    if (error) throw error;
   },
 
-  async changePassword(currentPass: string, newPass: string) {
-    const { data: { user } } = await supabase.auth.getUser();
-    const email = user?.email;
-    if (!email) throw new Error("No active session found.");
-
-    const { error: verifyError } = await supabase.auth.signInWithPassword({
-      email: email,
-      password: currentPass,
-    });
-
-    if (verifyError) throw new Error("Present password is incorrect.");
-
+  async changePassword(current: string, newPass: string) {
     const { error } = await supabase.auth.updateUser({ password: newPass });
     if (error) throw error;
   },
@@ -396,7 +521,9 @@ export const userService = {
   async logoutUser() {
     localStorage.removeItem('learnages_user');
     forceLogoutStorageClear();
-    try { await supabase.auth.signOut(); } catch {}
+    try {
+      await supabase.auth.signOut();
+    } catch {}
     window.location.reload();
   }
 };

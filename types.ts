@@ -1,4 +1,3 @@
-
 export interface WordPair {
   original: string;
   translated: string;
@@ -33,8 +32,9 @@ export interface TranslationResult {
 }
 
 export interface MatrixLangData {
-  n: string; 
-  l: string; 
+  n: string; // native script
+  l: string; // latin pronunciation
+  b?: Record<string, string>; // language-specific phonetic bridges (e.g. kn: "ನಮಸ್ತೆ" for Hindi)
 }
 
 export interface MatrixEntry {

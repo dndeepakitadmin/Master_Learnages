@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { BookOpen, MessageCircle, GraduationCap, User as UserIcon, Crown, LogIn, HelpCircle, Flame, Lock, Shield } from 'lucide-react';
+import { BookOpen, MessageCircle, GraduationCap, User as UserIcon, Crown, LogIn, HelpCircle, Flame, Lock, Shield, Headphones } from 'lucide-react';
 import { UserProfile } from '../types';
 import { APP_LOGO, APP_NAME } from '../constants';
 
@@ -58,13 +57,13 @@ export const Navbar: React.FC<NavbarProps> = ({
               active={activeTab === 'translate'} 
               onClick={() => onTabChange('translate')} 
               icon={<BookOpen size={18} />} 
-              label="Study" 
+              label="Learn" 
             />
             <NavTab 
               active={activeTab === 'chat'} 
               onClick={() => onTabChange('chat')} 
               icon={<MessageCircle size={18} />} 
-              label="Conversation" 
+              label="Practice" 
             />
             <NavTab 
               active={activeTab === 'quiz'} 
@@ -78,6 +77,12 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={() => onTabChange('about')} 
               icon={<HelpCircle size={18} />} 
               label="About"
+            />
+            <NavTab 
+              active={false} 
+              onClick={onOpenSupport} 
+              icon={<Headphones size={18} />} 
+              label="Support" 
             />
           </div>
 
@@ -151,10 +156,11 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
       
-      <div className="md:hidden border-t border-slate-100 flex justify-around p-2 bg-white/95 backdrop-blur-md sticky top-16 z-30">
-         <MobileTab active={activeTab === 'translate'} onClick={() => onTabChange('translate')} icon={<BookOpen size={20} />} label="Study" />
-         <MobileTab active={activeTab === 'chat'} onClick={() => onTabChange('chat')} icon={<MessageCircle size={20} />} label="Chat" />
+      <div className="md:hidden border-t border-slate-100 flex justify-around p-2 bg-white/95 backdrop-blur-md sticky top-16 z-30 overflow-x-auto">
+         <MobileTab active={activeTab === 'translate'} onClick={() => onTabChange('translate')} icon={<BookOpen size={20} />} label="Learn" />
+         <MobileTab active={activeTab === 'chat'} onClick={() => onTabChange('chat')} icon={<MessageCircle size={20} />} label="Practice" />
          <MobileTab active={activeTab === 'quiz'} onClick={() => onTabChange('quiz')} icon={<GraduationCap size={20} />} label="Quiz" locked={!isPro} />
+         <MobileTab active={false} onClick={onOpenSupport} icon={<Headphones size={20} />} label="Support" />
          <MobileTab active={activeTab === 'about'} onClick={() => onTabChange('about')} icon={<HelpCircle size={20} />} label="About" />
       </div>
     </nav>
@@ -177,7 +183,7 @@ const NavTab = ({ active, onClick, icon, label, locked }: any) => (
 );
 
 const MobileTab = ({ active, onClick, icon, label, locked }: any) => (
-    <button onClick={onClick} className={`flex flex-col items-center justify-center w-full py-1 rounded-xl transition-all ${active ? 'text-[#1d4683] bg-indigo-50' : 'text-slate-400'}`}>
+    <button onClick={onClick} className={`flex flex-col items-center justify-center min-w-[64px] py-1 rounded-xl transition-all ${active ? 'text-[#1d4683] bg-indigo-50' : 'text-slate-400'}`}>
         <div className="relative">
             {icon}
             {locked && <div className="absolute -top-1 -right-2 bg-slate-100 rounded-full p-[2px] border border-white"><Lock size={8} className="text-slate-500" /></div>}

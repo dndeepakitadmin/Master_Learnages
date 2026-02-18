@@ -1,4 +1,3 @@
-
 import { TransliterationMap } from './types';
 
 export const MALAYALAM_MAP: TransliterationMap = {
@@ -14,9 +13,9 @@ export const MALAYALAM_MAP: TransliterationMap = {
   consonants: {
     'k': 'ക', 'kh': 'ഖ', 'g': 'ഗ', 'gh': 'ഘ',
     'ch': 'ച', 'chh': 'ഛ', 'j': 'ജ', 'jh': 'ഝ',
-    't': 'ട', 'th': 'ഠ', 'd': 'ഡ', 'dh': 'ഢ',
-    'T': 'ത', 'Th': 'ഥ', 'D': 'ദ', 'Dh': 'ധ',
+    't': 'ത', 'th': 'ഥ', 'd': 'ദ', 'dh': 'ധ',
+    'T': 'ട', 'Th': 'ഠ', 'D': 'ഡ', 'Dh': 'ഢ',
     'n': 'ന', 'N': 'ണ', 'p': 'പ', 'ph': 'ഫ', 'b': 'ബ', 'bh': 'ഭ', 'm': 'മ',
-    'y': 'യ', 'r': 'ര', 'l': 'ല', 'v': 'വ', 'sh': 'ശ', 'S': 'ഷ', 's': 'സ', 'h': 'ഹ'
+    'y': 'യ', 'r': 'ര', 'l': 'ല', 'v': 'വ', 'sh': 'ശ', 'S': 'ഷ', 's': 'സ', 'h': 'ஹ'
   }
 };

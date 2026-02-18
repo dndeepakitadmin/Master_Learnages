@@ -11,11 +11,12 @@ const enableSecurity = () => {
 
   // 2. Block Copy, Cut, Paste (Relaxed for Inputs/Textareas)
   const blockEvents = ['copy', 'cut', 'paste'];
-  blockEvents.forEach(event => {
-    document.addEventListener(event, (e) => {
+  blockEvents.forEach((eventName) => {
+    document.addEventListener(eventName, (e) => {
       const target = e.target as HTMLElement;
       // Allow copy/paste for user input fields specifically
-      if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT')) {
+      const isInput = target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT');
+      if (isInput) {
         return;
       }
       e.preventDefault();
@@ -41,14 +42,17 @@ const enableSecurity = () => {
       e.preventDefault();
       return false;
     }
+    return true;
   });
 
   // 4. Focus Blurring (Deters screenshots when window is not active)
   window.addEventListener('blur', () => {
-    document.getElementById('root')?.classList.add('security-blur');
+    const root = document.getElementById('root');
+    if (root) root.classList.add('security-blur');
   });
   window.addEventListener('focus', () => {
-    document.getElementById('root')?.classList.remove('security-blur');
+    const root = document.getElementById('root');
+    if (root) root.classList.remove('security-blur');
   });
 };
 
