@@ -109,7 +109,7 @@ export const AboutSection: React.FC = () => {
           rel="noopener noreferrer" 
           className="text-sm text-[#1d4683] hover:underline font-medium"
         >
-          Official Website & Privacy Policy
+          Official Website and Privacy Policy
         </a>
       </section>
 
