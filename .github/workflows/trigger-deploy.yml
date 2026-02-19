@@ -13,6 +13,6 @@ jobs:
         run: |
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
-            -H "Authorization: token ${{ secrets.DEPLOY_REPO_TOKEN }}" \
+            -H "Authorization: Bearer ${{ secrets.DEPLOY_REPO_TOKEN }}" \
             https://api.github.com/repos/dndeepakitadmin/Learnages-Deploy/dispatches \
             -d '{"event_type":"ai-studio-update"}'
